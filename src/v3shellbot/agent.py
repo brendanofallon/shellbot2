@@ -5,7 +5,6 @@ from pathlib import Path
 import yaml
 import json
 import uuid
-from pprint import pprint
 
 from pydantic_core import to_jsonable_python
 from ag_ui.core import RunAgentInput, UserMessage
@@ -22,8 +21,8 @@ from pydantic_ai import (
 )
         
 from v3shellbot.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
-
 from v3shellbot.message_history import MessageHistory
+from v3shellbot.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
 
 def create_tool_from_schema(tool_cls):
     return Tool.from_schema(
@@ -55,7 +54,7 @@ def load_conf(datadir: Path):
 
 
 class ShellBot3:
-    def __init__(self, datadir: Path, thread_id: str = None):
+    def __init__(self, datadir: Path, thread_id: str = None, event_dispatcher: EventDispatcher = None):
         self.message_history = MessageHistory(datadir / "message_history.db")
         if thread_id is None:
             thread_id = self.message_history.get_most_recent_thread_id()
@@ -64,6 +63,7 @@ class ShellBot3:
         self.thread_id = thread_id
         self.conf = load_conf(datadir)
         self.agent = self._initialize_agent(self.conf, create_tools())
+        self.event_dispatcher = event_dispatcher
     
     def _initialize_agent(self, conf, tools):
         return Agent(
@@ -105,6 +105,6 @@ class ShellBot3:
 
         adapter = AGUIAdapter(self.agent, run_input=run_input)
         async for event in adapter.run_stream(message_history=recent_messages, on_complete=on_complete):
-            pprint(event.model_dump_json(indent=2))
+            self.event_dispatcher.dispatch(event)
         
         return runresult
