@@ -159,6 +159,37 @@ class MessageHistory:
                 }
                 for msg in messages
             ]
+
+    @staticmethod
+    def _message_has_user_prompt(message_entry: dict) -> bool:
+        message = message_entry.get("message")
+        if not isinstance(message, dict):
+            return False
+        parts = message.get("parts", [])
+        if not isinstance(parts, list):
+            return False
+        return any(
+            isinstance(part, dict) and part.get("part_kind") == "user-prompt"
+            for part in parts
+        )
+
+    def get_messages_starting_with_user_prompt(
+        self,
+        thread_id: str,
+        limit: Optional[int] = None,
+    ) -> list[dict]:
+        """
+        Retrieve messages ensuring the first entry includes a user-prompt part.
+
+        This fetches up to twice the requested number of messages, then trims the
+        list to start at the earliest message that includes a user-prompt part.
+        """
+        effective_limit = None if limit is None else limit * 2
+        messages = self.get_messages(thread_id, limit=effective_limit)
+        for index, message_entry in enumerate(messages):
+            if self._message_has_user_prompt(message_entry):
+                return messages[index:]
+        return messages
     
     def get_thread_ids(self) -> list[str]:
         """
@@ -187,3 +218,18 @@ class MessageHistory:
             if thread_id is not None:
                 query = query.filter(Message.thread_id == thread_id)
             return query.count()
+    
+    def get_most_recent_thread_id(self) -> Optional[str]:
+        """
+        Get the thread_id of the most recently added message.
+        
+        Returns:
+            The thread_id of the most recent message, or None if no messages exist.
+        """
+        with self.SessionLocal() as session:
+            most_recent = (
+                session.query(Message)
+                .order_by(desc(Message.created_at))
+                .first()
+            )
+            return most_recent.thread_id if most_recent else None

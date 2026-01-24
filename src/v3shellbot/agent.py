@@ -4,16 +4,19 @@ import asyncio
 from pathlib import Path
 import yaml
 import json
-import random
-import os
+import uuid
+from pprint import pprint
 
 from pydantic_core import to_jsonable_python
+from ag_ui.core import RunAgentInput, UserMessage
+from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai import (
     Agent, 
     RunContext, 
     AgentRunResultEvent, 
     PartDeltaEvent, 
     TextPartDelta, 
+    AgentRunResult,
     Tool, 
     ModelMessagesTypeAdapter
 )
@@ -34,10 +37,10 @@ def create_tool_from_schema(tool_cls):
 def create_tools():
     return [
         create_tool_from_schema(ShellFunction()),
-        # create_tool_from_schema(ReaderFunction()),
-        # create_tool_from_schema(ClipboardFunction()),
-        # create_tool_from_schema(PythonFunction()),
-        # create_tool_from_schema(TavilySearchFunction()),
+        create_tool_from_schema(ReaderFunction()),
+        create_tool_from_schema(ClipboardFunction()),
+        create_tool_from_schema(PythonFunction()),
+        create_tool_from_schema(TavilySearchFunction()),
     ]
 
 
@@ -52,10 +55,14 @@ def load_conf(datadir: Path):
 
 
 class ShellBot3:
-    def __init__(self, thread_id: str):
+    def __init__(self, datadir: Path, thread_id: str = None):
+        self.message_history = MessageHistory(datadir / "message_history.db")
+        if thread_id is None:
+            thread_id = self.message_history.get_most_recent_thread_id()
+            if thread_id is None:
+                thread_id = str(uuid.uuid4())
         self.thread_id = thread_id
-        self.message_history = MessageHistory(Path(os.getenv("SB3_DATADIR", "~/.shellbot3")).expanduser() / "message_history.db")
-        self.conf = load_conf(Path(os.getenv("SB3_DATADIR", "~/.shellbot3")).expanduser())
+        self.conf = load_conf(datadir)
         self.agent = self._initialize_agent(self.conf, create_tools())
     
     def _initialize_agent(self, conf, tools):
@@ -70,27 +77,34 @@ class ShellBot3:
     async def run(self, prompt: str):
         recent_messages = ModelMessagesTypeAdapter.validate_python([
             msg['message']
-            for msg in self.message_history.get_messages(self.thread_id, limit=self.conf.get('recent_messages_limit', 10))
+            for msg in self.message_history.get_messages_starting_with_user_prompt(
+                self.thread_id,
+                limit=self.conf.get('recent_messages_limit', 10),
+            )
         ])
 
-        async for event in self.agent.run_stream_events(
-                prompt,
-                message_history=recent_messages
-        ):
-            if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                print(event.delta.content_delta, end='', flush=True)
-            elif isinstance(event, AgentRunResultEvent):
-                runresult = event.result
-        new_messages = runresult.new_messages() if runresult else None
-        new_messages_jsonable = to_jsonable_python(new_messages)
-        self.message_history.add_messages(self.thread_id, new_messages_jsonable)
+        run_input = RunAgentInput(
+            thread_id=self.thread_id,
+            run_id=str(uuid.uuid4()),
+            parent_run_id=None,
+            state=None,
+            messages=[UserMessage(id=str(uuid.uuid4()), content=prompt)],
+            tools=[],
+            context=[],
+            forwarded_props=None,
+        )
+
+        runresult = None
+        
+        def on_complete(result: AgentRunResult):
+            nonlocal runresult
+            runresult = result
+            new_messages = result.new_messages() if result else []
+            new_messages_jsonable = to_jsonable_python(new_messages)
+            self.message_history.add_messages(self.thread_id, new_messages_jsonable)
+
+        adapter = AGUIAdapter(self.agent, run_input=run_input)
+        async for event in adapter.run_stream(message_history=recent_messages, on_complete=on_complete):
+            pprint(event.model_dump_json(indent=2))
+        
         return runresult
-
-
-async def main():
-    agent = ShellBot3(thread_id='test')
-    runresult = await agent.run('Awesome, which ones are the biggest?')
-
-
-if __name__ == '__main__':
-    asyncio.run(main())
