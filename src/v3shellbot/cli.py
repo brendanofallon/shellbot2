@@ -17,19 +17,26 @@ from v3shellbot.event_dispatcher import create_rich_output_dispatcher, RichOutpu
     
 logger = logging.getLogger(__name__)
 
-def setup_logging(datadir: Path) -> None:
+def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
     """Configure logging to write to shellbot3.log in the datadir.
     
     Args:
         datadir: Path to the data directory where logs will be stored.
+        stream_to_stdout: If True, also stream log messages to stdout.
     """
+    print(f"Setting up logging to {datadir} with stream_to_stdout: {stream_to_stdout}")
     log_file = datadir / "shellbot3.log"
+    handlers: list[logging.Handler] = [logging.FileHandler(log_file)]
+    
+    if stream_to_stdout:
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.INFO)
+        handlers.append(stdout_handler)
+    
     logging.basicConfig(
         level=logging.INFO,
-        format='[%(asctime)s]  %(name)s   %(levelname)s  %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-        ]
+        format='[%(asctime)s] [PID %(process)d]  %(name)s   %(levelname)s  %(message)s',
+        handlers=handlers,
     )
     logging.info(f"Logging initialized, writing to {log_file}")
 
@@ -283,8 +290,11 @@ async def main() -> None:
     args = parser.parse_args()
     
     # Ensure datadir exists and set up logging
+    # Stream to stdout when running daemon in foreground
     args.datadir.mkdir(parents=True, exist_ok=True)
-    setup_logging(args.datadir)
+    stream_to_stdout = (args.command == 'daemon' and 
+                        getattr(args, 'daemon_command', None) == 'start')
+    setup_logging(args.datadir, stream_to_stdout=True)
     
     logger = logging.getLogger(__name__)
     logger.info(f"CLI started with command: {args.command}")

@@ -9,10 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import json
+import logging
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, desc
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+logger = logging.getLogger(__name__)
 
 class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
@@ -63,7 +65,7 @@ class MessageHistory:
         else:
             db_path = Path(db_path)
             db_url = f"sqlite:///{db_path}"
-        
+        logger.info(f"Creating engine with db_url: {db_url}")
         self.engine = create_engine(db_url)
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine)
@@ -103,6 +105,7 @@ class MessageHistory:
         Returns:
             List of IDs of the newly created messages
         """
+        print(f"Adding messages: {messages}")
         with self.SessionLocal() as session:
             msg_objects = []
             for message in messages:

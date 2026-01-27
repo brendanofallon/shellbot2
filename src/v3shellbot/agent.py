@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 import json
 import uuid
+import logging
 
 from pydantic_core import to_jsonable_python
 from ag_ui.core import RunAgentInput, UserMessage
@@ -19,10 +20,18 @@ from pydantic_ai import (
     Tool, 
     ModelMessagesTypeAdapter
 )
+from pydantic_ai.messages import ModelRequest
         
 from v3shellbot.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from v3shellbot.message_history import MessageHistory
 from v3shellbot.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
+from v3shellbot.tools.fastmailtool import FastmailTool
+from v3shellbot.tools.cal import CalendarTool
+from v3shellbot.tools.imagetool import ImageTool
+from v3shellbot.tools.memorytool import MemoryFunction
+from v3shellbot.tools.docstoretool import DocStoreTool 
+
+logger = logging.getLogger(__name__)
 
 def create_tool_from_schema(tool_cls):
     return Tool.from_schema(
@@ -37,6 +46,11 @@ def create_tools():
     return [
         create_tool_from_schema(ShellFunction()),
         create_tool_from_schema(ReaderFunction()),
+        create_tool_from_schema(FastmailTool()),
+        create_tool_from_schema(CalendarTool()),
+        create_tool_from_schema(ImageTool()),
+        create_tool_from_schema(MemoryFunction()),
+        create_tool_from_schema(DocStoreTool()),
         create_tool_from_schema(ClipboardFunction()),
         create_tool_from_schema(PythonFunction()),
         create_tool_from_schema(TavilySearchFunction()),
@@ -62,6 +76,7 @@ class ShellBot3:
                 thread_id = str(uuid.uuid4())
         self.thread_id = thread_id
         self.conf = load_conf(datadir)
+        logger.info(f"Config: {self.conf}")
         self.agent = self._initialize_agent(self.conf, create_tools())
         self.event_dispatcher = event_dispatcher
     
@@ -75,6 +90,7 @@ class ShellBot3:
         )
 
     async def run(self, prompt: str):
+        logger.info(f"Running prompt: {prompt[0:100]}...")
         recent_messages = ModelMessagesTypeAdapter.validate_python([
             msg['message']
             for msg in self.message_history.get_messages_starting_with_user_prompt(
@@ -82,13 +98,14 @@ class ShellBot3:
                 limit=self.conf.get('recent_messages_limit', 10),
             )
         ])
-
+        print(f"Creating run input")
+        user_message = UserMessage(id=str(uuid.uuid4()), content=prompt)
         run_input = RunAgentInput(
             thread_id=self.thread_id,
             run_id=str(uuid.uuid4()),
             parent_run_id=None,
             state=None,
-            messages=[UserMessage(id=str(uuid.uuid4()), content=prompt)],
+            messages=[user_message],
             tools=[],
             context=[],
             forwarded_props=None,
@@ -98,13 +115,38 @@ class ShellBot3:
         
         def on_complete(result: AgentRunResult):
             nonlocal runresult
-            runresult = result
-            new_messages = result.new_messages() if result else []
-            new_messages_jsonable = to_jsonable_python(new_messages)
-            self.message_history.add_messages(self.thread_id, new_messages_jsonable)
+            try:
+                print(f"on_complete result: {result}")
+                runresult = result
+                user_model_message = ModelRequest.user_text_prompt(prompt)
+                print(f"user_model_message: {user_model_message}")
+                new_messages = [user_model_message] + (result.new_messages() if result else [])
+                new_messages = [to_jsonable_python(m) for m in new_messages]
+                print(f"new_messages: {new_messages}")
+                self.message_history.add_messages(self.thread_id, new_messages)
+            except Exception as e:
+                import traceback, sys
+                tb = traceback.TracebackException(type(e), e, e.__traceback__)
+                last_tb = e.__traceback__
+                lineno = last_tb.tb_lineno if last_tb is not None else 'unknown'
+                filename = last_tb.tb_frame.f_code.co_filename if last_tb is not None else 'unknown'
+                stack = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+                logger.error(
+                    f"ERROR: in on_complete (File \"{filename}\", line {lineno}): {e}\nStack trace:\n{stack}",
+                    exc_info=True
+                )
+                raise e
 
         adapter = AGUIAdapter(self.agent, run_input=run_input)
         async for event in adapter.run_stream(message_history=recent_messages, on_complete=on_complete):
             self.event_dispatcher.dispatch(event)
+        
+        if runresult and runresult.usage():
+            usage = runresult.usage()
+            logger.info(
+                f"Token usage - Request: {usage.request_tokens}, "
+                f"Response: {usage.response_tokens}, "
+                f"Total: {usage.total_tokens}"
+            )
         
         return runresult

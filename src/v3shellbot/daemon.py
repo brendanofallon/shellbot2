@@ -6,7 +6,7 @@ This module provides a persistent daemon that:
 - Validates messages against the InputMessage schema
 - Feeds prompts to the agent
 - Streams AG-UI events to a ZeroMQ output socket
-- Only writes log messages to stdout
+- Writes log messages to both stdout and the log file
 """
 
 import asyncio
@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import logging
 
 import zmq
 import zmq.asyncio
@@ -23,22 +24,7 @@ from v3shellbot.agent import ShellBot3, load_conf
 from v3shellbot.event_dispatcher import create_zeromq_dispatcher
 
 
-def setup_logging(datadir: Path) -> None:
-    """Configure logging to write to shellbot3.log in the datadir
-    
-    Args:
-        datadir: Path to the data directory where logs will be stored.
-    """
-    log_file = datadir / "shellbot3.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s]  %(name)s   %(levelname)s  %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-        ]
-    )
-    logging.info(f"Logging initialized, writing to {log_file}")
-
+logger = logging.getLogger(__name__)
 
 @dataclass
 class InputMessage:
@@ -81,7 +67,7 @@ class AgentDaemon:
     to a ZeroMQ PUSH socket for output events. Each message should be JSON-formatted
     and conform to the InputMessage schema. When a message is received, the prompt
     is fed to the agent and AG-UI events are streamed to the output socket.
-    Only log messages are written to stdout.
+    Daemon log messages are written to both stdout and the log file.
     """
     
     def __init__(
@@ -94,7 +80,7 @@ class AgentDaemon:
             datadir: Path to the data directory containing agent configuration.
         """
         self.datadir = Path(datadir)
-        
+        logger.info(f"Initializing AgentDaemon with datadir: {self.datadir}")
         # Load configuration
         conf = load_conf(self.datadir)
         self.input_address = conf.get('input_address', 'tcp://127.0.0.1:5555')
@@ -105,9 +91,6 @@ class AgentDaemon:
         self._input_socket: zmq.asyncio.Socket | None = None
         self._output_socket: zmq.asyncio.Socket | None = None
         self.logger = logging.getLogger(__name__)
-        
-        # Set up logging to file
-        setup_logging(self.datadir)
         self.logger.info(f"AgentDaemon initialized with datadir={datadir}, input_address={self.input_address}, output_address={self.output_address}")
     
     async def start(self) -> None:
@@ -131,14 +114,14 @@ class AgentDaemon:
         self.logger.info(f"AgentDaemon started")
         self.logger.info(f"Input socket bound to {self.input_address}")
         self.logger.info(f"Output socket bound to {self.output_address}")
-        print(f"AgentDaemon started - Input: {self.input_address}, Output: {self.output_address}")
+        logger.info(f"AgentDaemon started - Input address: {self.input_address}, Output address: {self.output_address}")
         
         while self._running:
             try:
                 # Wait for incoming message
                 message_bytes = await self._input_socket.recv()
                 message_str = message_bytes.decode("utf-8")
-                self.logger.debug(f"Received message: {message_str[:100]}...")
+                logger.info(f"Received message: {message_str[:100]}...")
                 
                 await self._handle_message(message_str)
                 
@@ -161,7 +144,7 @@ class AgentDaemon:
             self.logger.error(f"Invalid message received: {e}")
             return
         
-        self.logger.info(f"Processing message from {input_message.source}: {input_message.prompt[:100]}...")
+        logger.info(f"Processing message from {input_message.source}: {input_message.prompt[:100]}...")
         
         # Create event dispatcher that sends AG-UI events to the output socket
         # Pass the daemon's output socket to the dispatcher
@@ -175,9 +158,9 @@ class AgentDaemon:
         
         try:
             await agent.run(input_message.prompt)
-            self.logger.info("Message processing completed successfully")
+            logger.info("Message processing completed successfully")
         except Exception as e:
-            self.logger.error(f"Agent error: {e}", exc_info=True)
+            logger.error(f"Agent error: {e}", exc_info=True)
     
     async def stop(self) -> None:
         """Stop the daemon and clean up resources."""

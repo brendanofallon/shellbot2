@@ -6,8 +6,12 @@ import tempfile
 from v3shellbot.tools.util import classproperty
 
 class DocStoreTool:
-    def __init__(self, store_id: str):
+    def __init__(self, store_id: str = None):
         self.mixedbread = mxbai.Mixedbread(api_key=os.getenv("MIXEDBREAD_API_KEY"))
+        if store_id is None:
+            store_id = os.getenv("MIXEDBREAD_STORE_ID")
+            if store_id is None:
+                raise ValueError("MIXEDBREAD_STORE_ID is not set")
         self.store_id = store_id
         assert self.store_id, "store-id is required"
         # To get a path to a suitable directory for temporary files (like /tmp), use tempfile.gettempdir()

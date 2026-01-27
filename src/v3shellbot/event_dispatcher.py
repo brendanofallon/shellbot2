@@ -183,7 +183,7 @@ class RichOutputHandler(EventHandler):
             # Print tool call header
             self.console.print()
             self.console.print(
-                Text(f"🔧 Tool: {tool_call_name}", style="bold cyan")
+                Text(f"🔧 Executing tool: [bold]{tool_call_name}[/bold]", style='green')
             )
     
     def _handle_tool_call_args(self, event: BaseEvent) -> None:
