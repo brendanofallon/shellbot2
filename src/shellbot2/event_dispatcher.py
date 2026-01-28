@@ -183,7 +183,7 @@ class RichOutputHandler(EventHandler):
             # Print tool call header
             self.console.print()
             self.console.print(
-                Text(f"🔧 Executing tool: [bold]{tool_call_name}[/bold]", style='green')
+                Text(f"🔧 Executing tool: {tool_call_name}", style='bold green')
             )
     
     def _handle_tool_call_args(self, event: BaseEvent) -> None:
@@ -206,7 +206,7 @@ class RichOutputHandler(EventHandler):
             if args_str:
                 try:
                     args_obj = json.loads(args_str)
-                    args_formatted = json.dumps(args_obj, indent=2)
+                    args_formatted = "\n".join(f"{k}: {v}" for k, v in args_obj.items())
                     syntax = Syntax(args_formatted, "json", theme="monokai", line_numbers=False)
                     self.console.print(Panel(syntax, title="Arguments", border_style="dim"))
                 except json.JSONDecodeError:

@@ -98,7 +98,6 @@ class ShellBot3:
                 limit=self.conf.get('recent_messages_limit', 10),
             )
         ])
-        print(f"Creating run input")
         user_message = UserMessage(id=str(uuid.uuid4()), content=prompt)
         run_input = RunAgentInput(
             thread_id=self.thread_id,
@@ -116,13 +115,10 @@ class ShellBot3:
         def on_complete(result: AgentRunResult):
             nonlocal runresult
             try:
-                print(f"on_complete result: {result}")
                 runresult = result
                 user_model_message = ModelRequest.user_text_prompt(prompt)
-                print(f"user_model_message: {user_model_message}")
                 new_messages = [user_model_message] + (result.new_messages() if result else [])
                 new_messages = [to_jsonable_python(m) for m in new_messages]
-                print(f"new_messages: {new_messages}")
                 self.message_history.add_messages(self.thread_id, new_messages)
             except Exception as e:
                 import traceback, sys
