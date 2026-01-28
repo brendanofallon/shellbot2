@@ -11,8 +11,8 @@ import time
 import zmq
 
 from ag_ui.core import BaseEvent
-from v3shellbot.agent import ShellBot3, load_conf
-from v3shellbot.event_dispatcher import create_rich_output_dispatcher, RichOutputHandler
+from shellbot2.agent import ShellBot3, load_conf
+from shellbot2.event_dispatcher import create_rich_output_dispatcher, RichOutputHandler
 
     
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ async def run_prompt(args: argparse.Namespace) -> None:
 
 async def daemon_start(args: argparse.Namespace) -> None:
     """Start the agent daemon."""
-    from v3shellbot.daemon import AgentDaemon
+    from shellbot2.daemon import AgentDaemon
     
     logger = logging.getLogger(__name__)
     pid_file = get_pid_file(args.datadir)

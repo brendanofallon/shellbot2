@@ -9,7 +9,7 @@ from gcsa.google_calendar import GoogleCalendar
 from gcsa.event import Event
 from google.oauth2.service_account import Credentials
 
-from v3shellbot.tools.util import classproperty
+from shellbot2.tools.util import classproperty
 
 logger = logging.getLogger(__name__)
 

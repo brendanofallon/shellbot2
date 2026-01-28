@@ -22,14 +22,14 @@ from pydantic_ai import (
 )
 from pydantic_ai.messages import ModelRequest
         
-from v3shellbot.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
-from v3shellbot.message_history import MessageHistory
-from v3shellbot.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
-from v3shellbot.tools.fastmailtool import FastmailTool
-from v3shellbot.tools.cal import CalendarTool
-from v3shellbot.tools.imagetool import ImageTool
-from v3shellbot.tools.memorytool import MemoryFunction
-from v3shellbot.tools.docstoretool import DocStoreTool 
+from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
+from shellbot2.message_history import MessageHistory
+from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
+from shellbot2.tools.fastmailtool import FastmailTool
+from shellbot2.tools.cal import CalendarTool
+from shellbot2.tools.imagetool import ImageTool
+from shellbot2.tools.memorytool import MemoryFunction
+from shellbot2.tools.docstoretool import DocStoreTool 
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ from tavily import TavilyClient
 
 logger = logging.getLogger(__name__)    
 
-from v3shellbot.tools.util import classproperty
+from shellbot2.tools.util import classproperty
 
 
 class ShellFunction:

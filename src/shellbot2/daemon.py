@@ -20,8 +20,8 @@ import logging
 import zmq
 import zmq.asyncio
 
-from v3shellbot.agent import ShellBot3, load_conf
-from v3shellbot.event_dispatcher import create_zeromq_dispatcher
+from shellbot2.agent import ShellBot3, load_conf
+from shellbot2.event_dispatcher import create_zeromq_dispatcher
 
 
 logger = logging.getLogger(__name__)

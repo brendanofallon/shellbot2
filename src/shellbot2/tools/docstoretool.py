@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 
-from v3shellbot.tools.util import classproperty
+from shellbot2.tools.util import classproperty
 
 class DocStoreTool:
     def __init__(self, store_id: str = None):

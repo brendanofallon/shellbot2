@@ -1,5 +1,5 @@
 [project]
-name = "v3shellbot"
+name = "shellbot2"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-v3shellbot = "v3shellbot:main"
+shellbot2 = "shellbot2:main"
 
 [build-system]
 requires = ["hatchling"]

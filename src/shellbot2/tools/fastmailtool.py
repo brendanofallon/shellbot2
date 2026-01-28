@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from v3shellbot.tools.util import classproperty
+from shellbot2.tools.util import classproperty
 
 import requests
 import json

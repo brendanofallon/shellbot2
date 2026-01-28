@@ -5,7 +5,7 @@ import base64
 from typing import Optional
 
 from google import genai
-from v3shellbot.tools.util import classproperty
+from shellbot2.tools.util import classproperty
 
 
 class ImageTool:
