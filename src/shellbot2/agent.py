@@ -93,9 +93,10 @@ class ShellBot3:
         logger.info(f"Running prompt: {prompt[0:100]}...")
         recent_messages = ModelMessagesTypeAdapter.validate_python([
             msg['message']
-            for msg in self.message_history.get_messages_starting_with_user_prompt(
+            for msg in self.message_history.get_recent_interactions(
                 self.thread_id,
-                limit=self.conf.get('recent_messages_limit', 10),
+                limit=self.conf.get('recent_messages_limit', 5),
+                messages_only=True,
             )
         ])
         user_message = UserMessage(id=str(uuid.uuid4()), content=prompt)
@@ -119,7 +120,7 @@ class ShellBot3:
                 user_model_message = ModelRequest.user_text_prompt(prompt)
                 new_messages = [user_model_message] + (result.new_messages() if result else [])
                 new_messages = [to_jsonable_python(m) for m in new_messages]
-                self.message_history.add_messages(self.thread_id, new_messages)
+                self.message_history.add_interaction(self.thread_id, new_messages)
             except Exception as e:
                 import traceback, sys
                 tb = traceback.TracebackException(type(e), e, e.__traceback__)

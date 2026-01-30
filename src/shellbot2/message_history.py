@@ -5,11 +5,16 @@ This module provides an append-only message history storage system where message
 can be added but not edited or removed.
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import json
 import logging
+import re
+import uuid
+
+from rank_bm25 import BM25Okapi
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, desc
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -28,6 +33,7 @@ class Message(Base):
     Attributes:
         id: Auto-incrementing primary key
         thread_id: Identifier for the conversation thread
+        interaction_id: Optional identifier grouping messages into an interaction
         message: JSON formatted string containing the message content
         created_at: Timestamp when the message was added
     """
@@ -35,11 +41,29 @@ class Message(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     thread_id = Column(String, nullable=False, index=True)
+    interaction_id = Column(String, nullable=True, index=True)
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     
     def __repr__(self) -> str:
-        return f"<Message(id={self.id}, thread_id={self.thread_id}, created_at={self.created_at})>"
+        return f"<Message(id={self.id}, thread_id={self.thread_id}, interaction_id={self.interaction_id}, created_at={self.created_at})>"
+
+
+@dataclass
+class Interaction:
+    """
+    Represents a group of messages that share the same interaction_id.
+    
+    Attributes:
+        interaction_id: Unique identifier for this interaction
+        thread_id: The thread this interaction belongs to
+        messages: List of message dictionaries in this interaction
+        created_at: Timestamp of the first message in the interaction
+    """
+    interaction_id: str
+    thread_id: str
+    messages: list[dict] = field(default_factory=list)
+    created_at: Optional[str] = None
 
 
 class MessageHistory:
@@ -119,6 +143,149 @@ class MessageHistory:
             
             session.commit()
             return [msg.id for msg in msg_objects]
+
+    def add_interaction(self, thread_id: str, messages: list[str] | str) -> str:
+        """
+        Add one or more messages as a single interaction.
+        
+        All messages will share the same interaction_id, grouping them together
+        as a logical unit.
+        
+        Args:
+            thread_id: Identifier for the conversation thread
+            messages: A single message string or list of message strings
+            
+        Returns:
+            The generated interaction_id for the new interaction
+        """
+        if isinstance(messages, str):
+            messages = [messages]
+        
+        interaction_id = str(uuid.uuid4())
+        
+        with self.SessionLocal() as session:
+            for message in messages:
+                msg = Message(
+                    thread_id=thread_id,
+                    interaction_id=interaction_id,
+                    message=json.dumps(message),
+                    created_at=datetime.now()
+                )
+                session.add(msg)
+            
+            session.commit()
+            return interaction_id
+
+    def get_all_interactions(self, thread_id: str) -> list[Interaction]:
+        """
+        Retrieve all interactions for a given thread.
+        
+        Groups messages by their interaction_id and returns them as Interaction objects.
+        Messages without an interaction_id are each returned as their own single-message
+        interaction with a generated ID.
+        
+        Args:
+            thread_id: Identifier for the conversation thread
+            
+        Returns:
+            List of Interaction objects, ordered by the creation time of their first message.
+        """
+        with self.SessionLocal() as session:
+            messages = (
+                session.query(Message)
+                .filter(Message.thread_id == thread_id)
+                .order_by(Message.created_at)
+                .all()
+            )
+            
+            # Group messages by interaction_id
+            interactions_dict: dict[str, list[Message]] = {}
+            standalone_messages: list[Message] = []
+            
+            for msg in messages:
+                if msg.interaction_id:
+                    if msg.interaction_id not in interactions_dict:
+                        interactions_dict[msg.interaction_id] = []
+                    interactions_dict[msg.interaction_id].append(msg)
+                else:
+                    standalone_messages.append(msg)
+            
+            # Build Interaction objects
+            result: list[Interaction] = []
+            
+            # Add grouped interactions
+            for interaction_id, msgs in interactions_dict.items():
+                interaction = Interaction(
+                    interaction_id=interaction_id,
+                    thread_id=thread_id,
+                    messages=[
+                        {
+                            "id": m.id,
+                            "thread_id": m.thread_id,
+                            "interaction_id": m.interaction_id,
+                            "message": json.loads(m.message),
+                            "created_at": m.created_at.isoformat()
+                        }
+                        for m in msgs
+                    ],
+                    created_at=msgs[0].created_at.isoformat() if msgs else None
+                )
+                result.append(interaction)
+            
+            # Add standalone messages as single-message interactions
+            for msg in standalone_messages:
+                interaction = Interaction(
+                    interaction_id=f"standalone-{msg.id}",
+                    thread_id=thread_id,
+                    messages=[
+                        {
+                            "id": msg.id,
+                            "thread_id": msg.thread_id,
+                            "interaction_id": None,
+                            "message": json.loads(msg.message),
+                            "created_at": msg.created_at.isoformat()
+                        }
+                    ],
+                    created_at=msg.created_at.isoformat()
+                )
+                result.append(interaction)
+            
+            # Sort all interactions by created_at
+            result.sort(key=lambda x: x.created_at or "")
+            
+            return result
+
+    def get_recent_interactions(self, thread_id: str, limit: int, messages_only: bool = False) -> list[Interaction]:
+        """
+        Retrieve the most recent N interactions for a given thread.
+        
+        Args:
+            thread_id: Identifier for the conversation thread
+            limit: Maximum number of interactions to return
+            messages_only: If True, return only the messages in the Interactions, not the Interactions themselves
+            
+        Returns:
+            List of the most recent Interaction objects, ordered from oldest to newest.
+        """
+        all_interactions = self.get_all_interactions(thread_id)
+        if limit >= len(all_interactions):
+            limit = len(all_interactions)
+        interactions = all_interactions[-limit:]
+        if messages_only:
+            all_messages = [
+                {
+                    "id": msg.id,
+                    "thread_id": msg.thread_id,
+                    "interaction_id": msg.interaction_id,
+                    "message": json.loads(msg.message),
+                    "created_at": msg.created_at.isoformat()
+                }
+                for interaction in interactions
+                for msg in interaction.messages
+                ]
+            return all_messages
+        else:
+            return interactions
     
     def get_messages(
         self, 
@@ -175,24 +342,6 @@ class MessageHistory:
             isinstance(part, dict) and part.get("part_kind") == "user-prompt"
             for part in parts
         )
-
-    def get_messages_starting_with_user_prompt(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-    ) -> list[dict]:
-        """
-        Retrieve messages ensuring the first entry includes a user-prompt part.
-
-        This fetches up to twice the requested number of messages, then trims the
-        list to start at the earliest message that includes a user-prompt part.
-        """
-        effective_limit = None if limit is None else limit * 2
-        messages = self.get_messages(thread_id, limit=effective_limit)
-        for index, message_entry in enumerate(messages):
-            if self._message_has_user_prompt(message_entry):
-                return messages[index:]
-        return messages
     
     def get_thread_ids(self) -> list[str]:
         """
@@ -236,3 +385,246 @@ class MessageHistory:
                 .first()
             )
             return most_recent.thread_id if most_recent else None
+
+    @staticmethod
+    def _extract_searchable_content(message: dict) -> str:
+        """
+        Extract searchable content from user-prompt and text parts only.
+        
+        This filters out non-content fields like provider_details, usage,
+        tool-call, and tool-return parts.
+        
+        Args:
+            message: The message dict containing parts
+            
+        Returns:
+            Combined searchable text from user-prompt and text parts
+        """
+        parts = message.get("parts", [])
+        searchable_parts = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_kind = part.get("part_kind", "")
+            if part_kind in ("user-prompt", "text"):
+                content = part.get("content", "")
+                if content:
+                    searchable_parts.append(content)
+        return " ".join(searchable_parts)
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """
+        Tokenize text for BM25 indexing.
+        
+        Converts to lowercase and extracts word tokens.
+        
+        Args:
+            text: Text to tokenize
+            
+        Returns:
+            List of lowercase word tokens
+        """
+        text = text.lower()
+        tokens = re.findall(r'\b\w+\b', text)
+        return tokens
+
+    def _get_all_messages_raw(
+        self,
+        thread_id: Optional[str] = None
+    ) -> list[tuple[int, str, str, datetime]]:
+        """
+        Retrieve all messages as raw tuples, optionally filtered by thread_id.
+        
+        Args:
+            thread_id: Optional thread to filter by. If None, returns all messages.
+            
+        Returns:
+            List of tuples (id, thread_id, message_json, created_at)
+        """
+        with self.SessionLocal() as session:
+            query = session.query(Message)
+            if thread_id is not None:
+                query = query.filter(Message.thread_id == thread_id)
+            messages = query.order_by(Message.created_at).all()
+            return [
+                (msg.id, msg.thread_id, msg.message, msg.created_at)
+                for msg in messages
+            ]
+
+    def _get_message_pair(
+        self,
+        message_id: int,
+        all_messages: list[tuple[int, str, str, datetime]]
+    ) -> list[tuple[int, str, str, datetime]]:
+        """
+        Get the user-assistant message pair containing the given message.
+        
+        For a user message (request), returns it plus the following response.
+        For an assistant message (response), returns the preceding request plus it.
+        
+        Args:
+            message_id: The ID of the matched message
+            all_messages: List of all messages as tuples
+            
+        Returns:
+            List of message tuples forming the conversation pair
+        """
+        # Find the index of the message
+        idx = None
+        for i, (mid, _, _, _) in enumerate(all_messages):
+            if mid == message_id:
+                idx = i
+                break
+        
+        if idx is None:
+            return []
+        
+        msg_id, thread_id, message_json, created_at = all_messages[idx]
+        message = json.loads(message_json)
+        kind = message.get("kind", "")
+        
+        pair = []
+        if kind == "request":
+            # This is a user message, include it and the next response if exists
+            pair.append(all_messages[idx])
+            if idx + 1 < len(all_messages):
+                next_msg = json.loads(all_messages[idx + 1][2])
+                if next_msg.get("kind") == "response":
+                    pair.append(all_messages[idx + 1])
+        elif kind == "response":
+            # This is an assistant message, include previous request and this
+            if idx > 0:
+                prev_msg = json.loads(all_messages[idx - 1][2])
+                if prev_msg.get("kind") == "request":
+                    pair.append(all_messages[idx - 1])
+            pair.append(all_messages[idx])
+        else:
+            # Unknown kind, just return this message
+            pair.append(all_messages[idx])
+        
+        return pair
+
+    @staticmethod
+    def _format_message_pair(
+        pair: list[tuple[int, str, str, datetime]]
+    ) -> str:
+        """
+        Format a message pair as a human-readable string for LLM consumption.
+        
+        Args:
+            pair: List of message tuples (id, thread_id, message_json, created_at)
+            
+        Returns:
+            Formatted string with datetime and role-labeled content
+        """
+        if not pair:
+            return ""
+        
+        # Use the timestamp from the first message in the pair
+        _, _, _, created_at = pair[0]
+        formatted_time = created_at.strftime("%Y-%m-%d %H:%M")
+        
+        lines = [f"--- Conversation from {formatted_time} ---"]
+        
+        for _, _, message_json, _ in pair:
+            message = json.loads(message_json)
+            kind = message.get("kind", "")
+            content = MessageHistory._extract_searchable_content(message)
+            
+            if kind == "request":
+                role = "User"
+            elif kind == "response":
+                role = "Assistant"
+            else:
+                role = "Unknown"
+            
+            if content:
+                lines.append(f"{role}: {content}")
+        
+        return "\n".join(lines)
+
+    def search(
+        self,
+        query: str,
+        thread_id: Optional[str] = None,
+        limit: int = 5,
+        min_score: float = 0.5,
+    ) -> str:
+        """
+        Search message history using BM25 ranking.
+        
+        Searches through user prompts and assistant text responses,
+        ignoring tool calls, tool returns, provider details, and usage data.
+        
+        Args:
+            query: Search query string
+            thread_id: Optional thread to search within (searches all if None)
+            limit: Maximum number of conversation pairs to return
+            
+        Returns:
+            Human-readable formatted string of matching conversation fragments,
+            suitable for LLM input. Returns empty string if no matches found.
+        """
+        # Get all messages
+        all_messages = self._get_all_messages_raw(thread_id)
+        
+        if not all_messages:
+            return ""
+        
+        # Build corpus for BM25
+        corpus = []
+        message_ids = []
+        for msg_id, _, message_json, _ in all_messages:
+            message = json.loads(message_json)
+            content = self._extract_searchable_content(message)
+            if content.strip():  # Only index messages with searchable content
+                corpus.append(self._tokenize(content))
+                message_ids.append(msg_id)
+        
+        if not corpus:
+            return ""
+        
+        # Create BM25 index and search
+        bm25 = BM25Okapi(corpus)
+        query_tokens = self._tokenize(query)
+        scores = bm25.get_scores(query_tokens)
+        
+        # Get top scoring messages
+        scored_indices = [(i, score) for i, score in enumerate(scores) if score > min_score]
+        scored_indices.sort(key=lambda x: x[1], reverse=True)
+        
+        # Collect unique message pairs (avoid duplicates if both request and response match)
+        seen_pair_ids = set()
+        result_pairs = []
+        
+        for idx, _ in scored_indices:
+            if len(result_pairs) >= limit:
+                break
+            
+            msg_id = message_ids[idx]
+            pair = self._get_message_pair(msg_id, all_messages)
+            
+            if not pair:
+                continue
+            
+            # Create a unique identifier for this pair
+            pair_id = tuple(m[0] for m in pair)
+            if pair_id in seen_pair_ids:
+                continue
+            
+            seen_pair_ids.add(pair_id)
+            result_pairs.append(pair)
+        
+        # Format results
+        formatted_results = []
+        for pair in result_pairs:
+            formatted = self._format_message_pair(pair)
+            if formatted:
+                formatted_results.append(formatted)
+        
+        return "\n\n".join(formatted_results)
+
+if __name__ == "__main__":
+    message_history = MessageHistory(db_path="sb3datadir/message_history.db")
+    print(message_history.search("git error"))

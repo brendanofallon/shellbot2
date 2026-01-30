@@ -14,6 +14,7 @@ dependencies = [
     "pymupdf-layout>=1.26.6",
     "pymupdf4llm>=0.2.9",
     "pyzmq>=27.1.0",
+    "rank-bm25>=0.2.2",
     "rich>=13.0.0",
     "sqlalchemy>=2.0.45",
     "tavily>=1.1.0",
