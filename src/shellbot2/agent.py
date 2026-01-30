@@ -30,6 +30,7 @@ from shellbot2.tools.cal import CalendarTool
 from shellbot2.tools.imagetool import ImageTool
 from shellbot2.tools.memorytool import MemoryFunction
 from shellbot2.tools.docstoretool import DocStoreTool 
+from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,9 @@ class ShellBot3:
         self.thread_id = thread_id
         self.conf = load_conf(datadir)
         logger.info(f"Config: {self.conf}")
-        self.agent = self._initialize_agent(self.conf, create_tools())
+        tools = create_tools()
+        tools.append(create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)))
+        self.agent = self._initialize_agent(self.conf, tools)
         self.event_dispatcher = event_dispatcher
     
     def _initialize_agent(self, conf, tools):
