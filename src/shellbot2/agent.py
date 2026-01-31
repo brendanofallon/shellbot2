@@ -95,7 +95,7 @@ class ShellBot3:
     async def run(self, prompt: str):
         logger.info(f"Running prompt: {prompt[0:100]}...")
         recent_messages = ModelMessagesTypeAdapter.validate_python([
-            msg['message']
+            msg.message
             for msg in self.message_history.get_recent_interactions(
                 self.thread_id,
                 limit=self.conf.get('recent_messages_limit', 5),

@@ -57,12 +57,12 @@ class Interaction:
     Attributes:
         interaction_id: Unique identifier for this interaction
         thread_id: The thread this interaction belongs to
-        messages: List of message dictionaries in this interaction
+        messages: List of Message objects in this interaction
         created_at: Timestamp of the first message in the interaction
     """
     interaction_id: str
     thread_id: str
-    messages: list[dict] = field(default_factory=list)
+    messages: list[Message] = field(default_factory=list)
     created_at: Optional[str] = None
 
 
@@ -219,13 +219,13 @@ class MessageHistory:
                     interaction_id=interaction_id,
                     thread_id=thread_id,
                     messages=[
-                        {
-                            "id": m.id,
-                            "thread_id": m.thread_id,
-                            "interaction_id": m.interaction_id,
-                            "message": json.loads(m.message),
-                            "created_at": m.created_at.isoformat()
-                        }
+                        Message(
+                            id=m.id,
+                            thread_id=m.thread_id,
+                            interaction_id=m.interaction_id,
+                            message=json.loads(m.message),
+                            created_at=m.created_at
+                        )
                         for m in msgs
                     ],
                     created_at=msgs[0].created_at.isoformat() if msgs else None
@@ -238,13 +238,13 @@ class MessageHistory:
                     interaction_id=f"standalone-{msg.id}",
                     thread_id=thread_id,
                     messages=[
-                        {
-                            "id": msg.id,
-                            "thread_id": msg.thread_id,
-                            "interaction_id": None,
-                            "message": json.loads(msg.message),
-                            "created_at": msg.created_at.isoformat()
-                        }
+                        Message(
+                            id=msg.id,
+                            thread_id=msg.thread_id,
+                            interaction_id=None,
+                            message=json.loads(msg.message),
+                            created_at=msg.created_at
+                        )
                     ],
                     created_at=msg.created_at.isoformat()
                 )
@@ -273,13 +273,7 @@ class MessageHistory:
         interactions = all_interactions[-limit:]
         if messages_only:
             all_messages = [
-                {
-                    "id": msg.id,
-                    "thread_id": msg.thread_id,
-                    "interaction_id": msg.interaction_id,
-                    "message": json.loads(msg.message),
-                    "created_at": msg.created_at.isoformat()
-                }
+                msg
                 for interaction in interactions
                 for msg in interaction.messages
                 ]

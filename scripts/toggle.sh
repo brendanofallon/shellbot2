@@ -17,6 +17,7 @@ exec_shellbot() {
 # Create a custom accept-line widget
 custom_accept_line() {
     if [[ $CURRENT_MODE == "ECHO" && -n "$BUFFER" ]]; then
+        echo "\n"
         exec_shellbot
         BUFFER=""  # Clear the command buffer
         zle reset-prompt

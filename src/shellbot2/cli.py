@@ -229,8 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--datadir',
         type=Path,
-        default=Path('~/.shellbot3').expanduser(),
-        help='The directory to store data (default: ~/.shellbot3)'
+        default=os.getenv('SHELLBOT_DATADIR', Path('~/.shellbot2').expanduser()),
+        help='The directory to store data (default: ~/.shellbot2)'
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -294,7 +294,7 @@ async def main() -> None:
     args.datadir.mkdir(parents=True, exist_ok=True)
     stream_to_stdout = (args.command == 'daemon' and 
                         getattr(args, 'daemon_command', None) == 'start')
-    setup_logging(args.datadir, stream_to_stdout=True)
+    setup_logging(args.datadir, stream_to_stdout=False)
     
     logger = logging.getLogger(__name__)
     logger.info(f"CLI started with command: {args.command}")
