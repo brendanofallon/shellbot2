@@ -229,8 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--datadir',
         type=Path,
-        default=Path('~/.shellbot3').expanduser(),
-        help='The directory to store data (default: ~/.shellbot3)'
+        default=os.getenv('SHELLBOT_DATADIR', Path('~/.shellbot2').expanduser()),
+        help='The directory to store data'
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')

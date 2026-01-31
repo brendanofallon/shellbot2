@@ -48,7 +48,7 @@ def create_tools():
         create_tool_from_schema(ShellFunction()),
         create_tool_from_schema(ReaderFunction()),
         create_tool_from_schema(FastmailTool()),
-        create_tool_from_schema(CalendarTool()),
+        #        create_tool_from_schema(CalendarTool()),
         create_tool_from_schema(ImageTool()),
         create_tool_from_schema(MemoryFunction()),
         create_tool_from_schema(DocStoreTool()),
