@@ -2,8 +2,13 @@ import mixedbread as mxbai
 import os
 from pathlib import Path
 import tempfile
+import json
 
 from shellbot2.tools.util import classproperty
+
+
+def format_data_chunk(chunk) -> str:
+    return json.dumps(chunk.to_json(), indent=2)
 
 class DocStoreTool:
     def __init__(self, store_id: str = None):
@@ -27,10 +32,12 @@ class DocStoreTool:
     
     @property
     def description(self):
-        return """This function manages a document store for storing and retrieving documents. It can store most kinds of files including text, PDF, images, and other types. It supports uploading files, downloading files, and semantic searching of file contents, even for images.
+        return """This function manages a document store for storing and retrieving documents. 
+        It can store most kinds of files including text, PDF, images, and other types. It supports uploading files, downloading files, and semantic searching of file contents, even for images.
         The 'search' operation searches documents and returns a list of high-scoring document chunks, the results include file-id that can be used to download the file if needed.
         The 'upload' operation uploads a file to the document store. It may not be ready immediately for searching.
         The 'download' operation downloads a file from the document store. If the destination_dir is not provided, the file is downloaded to the system temp directory. Either way, the path to the downloaded file is returned.
+        The 'list' operation lists all files in the document store along with their file-ids, and parsing status (pending, completed, failed, etc).
         """
     
     @property
@@ -40,12 +47,12 @@ class DocStoreTool:
             "properties": {
                 "operation": {
                     "type": "string",
-                    "description": "The operation to perform: 'search' to search documents, 'download' to download a file, or 'upload' to upload a file",
-                    "enum": ["search", "download", "upload"]
+                    "description": "The operation to perform: 'search' to search documents, 'download' to download a file, 'upload' to upload a file, or 'list' to list all files in the document store",
+                    "enum": ["search", "download", "upload", "list"]
                 },
                 "query": {
                     "type": "string",
-                    "description": "Search query for semantic search of document contents. Required when operation is 'search'."
+                    "description": "Search query for document contents, may be a few short keywords or simple phrase. Required when operation is 'search'."
                 },
                 "file_id": {
                     "type": "string",
@@ -72,14 +79,14 @@ class DocStoreTool:
             if not query:
                 return f"The function {self.name} with operation {op} requires a 'query' keyword argument, but didn't get one"
             results = self.mixedbread.stores.search(query=query, store_identifiers=[self.store_id], top_k=5)
-            return results.data
+            return "\n==========\n".join([format_data_chunk(chunk) for chunk in results.data])
         elif op == "download":
             file_id = kwargs.get('file_id')
             response = self.mixedbread.files.content(file_id)
             filename = kwargs.get('filename')
             destination_dir = kwargs.get('destination_dir', tempfile.gettempdir())
             if not os.path.exists(destination_dir):
-                raise ValueError(f"Destination directory {destination_dir} does not exist")
+                return f"Destination directory {destination_dir} does not exist"
             destination_path = os.path.join(destination_dir, filename)
             with open(destination_path, "wb") as f:
                 for chunk in response.iter_bytes():
@@ -88,7 +95,7 @@ class DocStoreTool:
         elif op == "upload":
             file_path = kwargs.get('file_path')
             if not os.path.exists(file_path):
-                raise ValueError(f"File {file_path} does not exist")
+                return f"File {file_path} does not exist"
             filename = os.path.basename(file_path)
 
             # First, create the file in mixedbread
@@ -97,6 +104,9 @@ class DocStoreTool:
                 file=Path(file_path),
             )
             return f"Uploaded file {filename}, response: {res}"
+        elif op == "list":
+            results = self.mixedbread.stores.files.list(store_identifier=self.store_id, limit=100)
+            return json.dumps(results.to_json(), indent=2)
 
 if __name__ == "__main__":
     docstoretool = DocStoreTool()

@@ -24,8 +24,7 @@ def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
         datadir: Path to the data directory where logs will be stored.
         stream_to_stdout: If True, also stream log messages to stdout.
     """
-    print(f"Setting up logging to {datadir} with stream_to_stdout: {stream_to_stdout}")
-    log_file = datadir / "shellbot3.log"
+    log_file = datadir / "shellbot2.log"
     handlers: list[logging.Handler] = [logging.FileHandler(log_file)]
     
     if stream_to_stdout:
