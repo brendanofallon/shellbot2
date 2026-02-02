@@ -61,7 +61,7 @@ class ConversationSearchTool:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query to find relevant conversations. Should be a few short keywords suitable as input for BM25 search."
+                    "description": "The search query to find relevant conversations. Should be a few short keywords suitable as input for BM25 search.g"
                 }
             },
             "required": ["query"]

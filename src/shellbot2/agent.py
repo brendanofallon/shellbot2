@@ -1,7 +1,9 @@
 
 from dataclasses import dataclass
 import asyncio
+from functools import wraps
 from pathlib import Path
+import traceback
 import yaml
 import json
 import uuid
@@ -34,9 +36,36 @@ from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 
 logger = logging.getLogger(__name__)
 
+
+def safe_tool_call(func, tool_name: str):
+    """Wrap a tool function to catch exceptions and return error messages.
+    
+    This prevents exceptions from propagating up and crashing the agent run.
+    Instead, errors are returned as text messages that the model can interpret.
+    
+    Args:
+        func: The tool's __call__ method to wrap.
+        tool_name: Name of the tool for error messages.
+        
+    Returns:
+        A wrapped function that catches exceptions and returns error text.
+    """
+    @wraps(func)
+    def wrapper(**kwargs):
+        try:
+            return func(**kwargs)
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+            tb = traceback.format_exc()
+            logger.error(f"Error in tool '{tool_name}': {error_type}: {error_msg}\n{tb}")
+            return f"Error executing tool '{tool_name}': {error_type}: {error_msg}"
+    return wrapper
+
+
 def create_tool_from_schema(tool_cls):
     return Tool.from_schema(
-        function=tool_cls.__call__,
+        function=safe_tool_call(tool_cls.__call__, tool_cls.name),
         name=tool_cls.name,
         description=tool_cls.description,
         json_schema=tool_cls.parameters,
@@ -139,8 +168,13 @@ class ShellBot3:
 
         adapter = AGUIAdapter(self.agent, run_input=run_input)
         async for event in adapter.run_stream(message_history=recent_messages, on_complete=on_complete):
+            logger.debug(f"Event: {event}")
             self.event_dispatcher.dispatch(event)
-        
+
+        if runresult is None:
+            logger.error("Run result is None :(, something went wrong)")
+            return None
+
         if runresult and runresult.usage():
             usage = runresult.usage()
             logger.info(

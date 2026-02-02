@@ -13,7 +13,8 @@ import json
 
 import zmq
 from ag_ui.core import BaseEvent
-from rich.console import Console
+from rich.box import Box
+from rich.console import Console, Group
 from rich.constrain import Constrain
 from rich.live import Live
 from rich.markdown import Markdown
@@ -21,6 +22,21 @@ from rich.padding import Padding
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
+
+
+# Custom box with only left border (using half block for medium thickness)
+LEFT_BORDER_BOX = Box(
+    """\
+▌   
+▌   
+    
+▌   
+    
+    
+▌   
+▌   
+"""
+)
 
 
 class EventHandler(ABC):
@@ -166,7 +182,7 @@ class RichOutputHandler(EventHandler):
         self.console.print()  # Add spacing after message
     
     def _handle_tool_call_start(self, event: BaseEvent) -> None:
-        """Handle start of tool call."""
+        """Handle start of tool call - store state, don't print yet."""
         tool_call_id = getattr(event, 'tool_call_id', None)
         tool_call_name = getattr(event, 'tool_call_name', None)
         
@@ -179,12 +195,8 @@ class RichOutputHandler(EventHandler):
             self._tool_calls[tool_call_id] = {
                 'name': tool_call_name or 'unknown',
                 'args': '',
+                'result': None,
             }
-            # Print tool call header
-            self.console.print()
-            self.console.print(
-                Text(f"🔧 Executing tool: {tool_call_name}", style='bold green')
-            )
     
     def _handle_tool_call_args(self, event: BaseEvent) -> None:
         """Handle tool call arguments - accumulate them."""
@@ -195,50 +207,77 @@ class RichOutputHandler(EventHandler):
             self._tool_calls[tool_call_id]['args'] += delta
     
     def _handle_tool_call_end(self, event: BaseEvent) -> None:
-        """Handle end of tool call - display formatted arguments."""
+        """Handle end of tool call - display tool name and arguments immediately."""
         tool_call_id = getattr(event, 'tool_call_id', None)
         
         if tool_call_id and tool_call_id in self._tool_calls:
             tool_info = self._tool_calls[tool_call_id]
-            args_str = tool_info['args']
+            tool_name = tool_info.get('name', 'Tool')
+            args_str = tool_info.get('args', '')
             
-            # Try to pretty-print JSON arguments
+            # Build panel content
+            panel_parts = []
+            
+            # Tool name header
+            panel_parts.append(Text(f"🔧 {tool_name}", style="bold green"))
+            
+            # Format arguments
             if args_str:
                 try:
                     args_obj = json.loads(args_str)
-                    args_formatted = "\n".join(f"{k}: {v}" for k, v in args_obj.items())
-                    syntax = Syntax(args_formatted, "json", theme="monokai", line_numbers=False)
-                    self.console.print(Panel(syntax, title="Arguments", border_style="dim"))
+                    args_formatted = "\n".join(f"  {k}: {v}" for k, v in args_obj.items())
+                    panel_parts.append(Text(args_formatted, style="bright blue"))
                 except json.JSONDecodeError:
-                    # Not valid JSON, print as-is
-                    self.console.print(Panel(args_str, title="Arguments", border_style="dim"))
+                    panel_parts.append(Text(f"  {args_str}", style="bright blue"))
+            
+            # Combine all parts
+            combined_content = Group(*panel_parts)
+            
+            self.console.print()
+            self.console.print(
+                Padding(
+                    Panel(
+                        combined_content,
+                        box=LEFT_BORDER_BOX,
+                        border_style="bright_blue",
+                        width=self.MARKDOWN_WIDTH,
+                        style="on grey15",
+                        padding=(0, 1, 0, 1), # top, right, bottom, left
+                    ),
+                    (0, 0, 0, 6), # top, right, bottom, left
+                )
+            )
     
     def _handle_tool_call_result(self, event: BaseEvent) -> None:
-        """Handle tool call result - display in panel."""
+        """Handle tool call result - display result in panel below the tool call panel."""
         tool_call_id = getattr(event, 'tool_call_id', None)
         content = getattr(event, 'content', None)
         
         if content:
-            tool_name = "Tool"
-            if tool_call_id and tool_call_id in self._tool_calls:
-                tool_name = self._tool_calls[tool_call_id].get('name', 'Tool')
-            
-            # Truncate very long results for display
+            # Truncate result to 250 chars
             display_content = content
-            if len(content) > 2000:
-                display_content = content[:2000] + "\n... (truncated)"
+            if len(content) > 250:
+                display_content = content[:250] + "... (truncated)"
+            
+            result_text = Text(f"Result: {display_content}", style="dim")
             
             self.console.print(
-                Panel(
-                    display_content,
-                    title=f"[green]Result from {tool_name}[/green]",
-                    border_style="green",
+                Padding(
+                    Panel(
+                    result_text,
+                    box=LEFT_BORDER_BOX,
+                    border_style="bright_blue",
+                    width=self.MARKDOWN_WIDTH,
+                    style="on grey15",
+                    padding=(0, 1, 0, 1),
+                    ),
+                    (0, 0, 1, 6), # top, right, bottom, left
                 )
-            )
-            
-            # Clean up tool call tracking
-            if tool_call_id and tool_call_id in self._tool_calls:
-                del self._tool_calls[tool_call_id]
+        )
+        
+        # Clean up tool call tracking
+        if tool_call_id and tool_call_id in self._tool_calls:
+            del self._tool_calls[tool_call_id]
     
     def cleanup(self) -> None:
         """Clean up any active Live displays. Call this if processing is interrupted."""
