@@ -26,7 +26,7 @@ def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
     """
     log_file = datadir / "shellbot2.log"
     handlers: list[logging.Handler] = [logging.FileHandler(log_file)]
-    
+    print(f"Logging to {log_file}, stream_to_stdout: {stream_to_stdout}")
     if stream_to_stdout:
         stdout_handler = logging.StreamHandler(sys.stdout)
         stdout_handler.setLevel(logging.INFO)
@@ -293,7 +293,7 @@ async def main() -> None:
     args.datadir.mkdir(parents=True, exist_ok=True)
     stream_to_stdout = (args.command == 'daemon' and 
                         getattr(args, 'daemon_command', None) == 'start')
-    setup_logging(args.datadir, stream_to_stdout=False)
+    setup_logging(args.datadir, stream_to_stdout=stream_to_stdout)
     
     logger = logging.getLogger(__name__)
     logger.info(f"CLI started with command: {args.command}")

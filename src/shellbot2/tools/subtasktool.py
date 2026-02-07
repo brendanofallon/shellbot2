@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 _manager = None
 
 class SubTaskTool:
-    def __init__(self, subtask_modules_dir: Path):
+    def __init__(self, subtask_modules_dir: Path, zmq_input_address: str):
         global _manager
         if _manager is None:
-            _manager = SubTaskManager(subtask_modules_dir)
+            _manager = SubTaskManager(subtask_modules_dir, zmq_input_address)
         self.manager = _manager
-
+        
     @property
     def name(self):
         return "subtasks"
@@ -30,6 +30,9 @@ class SubTaskTool:
         It can create new subtasks, list all subtasks with their name and status, retrieve the stdout and stderr of a subtask, and terminate subtasks. 
         To create a subtask, provide a unique name for the subtask and the full python module as a string. The module must provide a main() function, which will be executed when the subtask is started.
         The subtask will run asynchronously in the background, and the function will return immediately. The stdout and stderr from the subtask can be obtained at any time using the get_output operation.
+        All python code must include this import: 'from shellbot2.subtask.helpers import alert'
+        The alert function takes a single string as input and sends messages back to this LLM agent, which can then respond appropriately. The alert function
+        should be used to notify the agent of important events, like errors or completion, but not status or progress updates. 
         The subtask can be terminated using the terminate operation.
          """
     

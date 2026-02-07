@@ -49,7 +49,7 @@ class _QueueWriter:
         pass
 
 
-def _capture_output_wrapper(module_path, stdout_queue, stderr_queue, error_queue):
+def _capture_output_wrapper(module_path, stdout_queue, stderr_queue, error_queue, zmq_input_address: str):
     """
     Wrapper function that loads a task module and redirects stdout and stderr
     to queues, streaming output as it is produced. If the task raises an
@@ -62,8 +62,13 @@ def _capture_output_wrapper(module_path, stdout_queue, stderr_queue, error_queue
     old_stderr = sys.stderr
     sys.stdout = _QueueWriter(stdout_queue)
     sys.stderr = _QueueWriter(stderr_queue)
-    
+    module_name = module_path.stem
     try:
+        from shellbot2.subtask.helpers import set_conf
+        set_conf({
+            "zmq_input_address": zmq_input_address,
+            "subtask_name": module_name
+            })
         task = load_module_from_file(module_path)
         task.main()
     except BaseException:
@@ -81,7 +86,7 @@ class SubtaskHarness:
     Manages execution of a subtask module in a separate process with output capture.
     """
     
-    def __init__(self, module_path: Path):
+    def __init__(self, module_path: Path, zmq_input_address: str):
         """
         Initialize the harness and start the subtask process.
         
@@ -100,7 +105,7 @@ class SubtaskHarness:
         
         self.process = mp.Process(
             target=_capture_output_wrapper,
-            args=(module_path, self._stdout_queue, self._stderr_queue, self._error_queue)
+            args=(module_path, self._stdout_queue, self._stderr_queue, self._error_queue, zmq_input_address)
         )
     
     def start(self):
@@ -220,8 +225,9 @@ class SubTaskManager:
     Manages a collection of named subtask harnesses.
     """
 
-    def __init__(self, modules_dir: Path):
+    def __init__(self, modules_dir: Path, zmq_input_address: str):
         self._modules_dir = modules_dir
+        self._zmq_input_address = zmq_input_address
         if not self._modules_dir.exists():
             self._modules_dir.mkdir(parents=True, exist_ok=True)
         self._tasks: dict[str, SubtaskHarness] = {}
@@ -245,7 +251,7 @@ class SubTaskManager:
         module_path.write_text(code)
         if name in self._tasks:
             raise ValueError(f"A subtask with name '{name}' already exists")
-        harness = SubtaskHarness(module_path)
+        harness = SubtaskHarness(module_path, self._zmq_input_address)
         self._tasks[name] = harness
         if start:
             harness.start()
@@ -320,13 +326,13 @@ def run_subtask(path_to_task_module: Path):
 
 
 TEST_CODE = """
+from shellbot2.subtask.helpers import alert
 import time
 def main():
+    alert("Subtask started")
     for i in range(20):
         print(f"Subtask step {i}")
         time.sleep(0.25)
-        if i == 10:
-            raise Exception("Test error")
     print("Subtask finished")
 
 """

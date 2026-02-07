@@ -111,7 +111,7 @@ class ShellBot3:
             create_tool_from_schema(ClipboardFunction()),
             create_tool_from_schema(PythonFunction()),
             create_tool_from_schema(TavilySearchFunction()),
-            create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules")),
+            create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules", self.conf.get('input_address', 'tcp://127.0.0.1:5555'))),
             create_tool_from_schema(ConversationSearchTool(message_history=self.message_history))
         ]
 

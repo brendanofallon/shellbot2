@@ -87,9 +87,25 @@ class AgentDaemon:
         self.output_address = conf.get('output_address', 'tcp://127.0.0.1:5556')
         
         self._running = False
-        self._context: zmq.asyncio.Context | None = None
+        self._async_context: zmq.asyncio.Context | None = None
         self._input_socket: zmq.asyncio.Socket | None = None
-        self._output_socket: zmq.asyncio.Socket | None = None
+        
+        # Create a synchronous output socket and bind it now, so the
+        # ZeroMQEventHandler can send through it without creating its own.
+        # A sync socket is required here because EventDispatcher.dispatch()
+        # calls handle() synchronously (not awaited), and zmq.asyncio sockets
+        # return coroutines from send_string() which would silently drop msgs.
+        self._sync_context = zmq.Context()
+        self._output_socket = self._sync_context.socket(zmq.PUSH)
+        self._output_socket.bind(self.output_address)
+        
+        self.dispatcher = create_zeromq_dispatcher(socket=self._output_socket)
+        
+        # Create agent instance for this request
+        self.agent = ShellBot3(
+            datadir=self.datadir,
+            event_dispatcher=self.dispatcher,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"AgentDaemon initialized with datadir={datadir}, input_address={self.input_address}, output_address={self.output_address}")
     
@@ -99,15 +115,13 @@ class AgentDaemon:
         This method runs indefinitely until stop() is called or the process
         is interrupted.
         """
-        self._context = zmq.asyncio.Context()
+        self._async_context = zmq.asyncio.Context()
         
-        # Input socket: PULL socket to receive InputMessages
-        self._input_socket = self._context.socket(zmq.PULL)
+        # Input socket: async PULL socket to receive InputMessages
+        self._input_socket = self._async_context.socket(zmq.PULL)
         self._input_socket.bind(self.input_address)
         
-        # Output socket: PUSH socket to send AG-UI events
-        self._output_socket = self._context.socket(zmq.PUSH)
-        self._output_socket.bind(self.output_address)
+        # Output socket is already bound in __init__ (sync socket)
         
         self._running = True
         
@@ -146,18 +160,10 @@ class AgentDaemon:
         
         logger.info(f"Processing message from {input_message.source}: {input_message.prompt[:100]}...")
         
-        # Create event dispatcher that sends AG-UI events to the output socket
-        # Pass the daemon's output socket to the dispatcher
-        dispatcher = create_zeromq_dispatcher(socket=self._output_socket)
         
-        # Create agent instance for this request
-        agent = ShellBot3(
-            datadir=self.datadir,
-            event_dispatcher=dispatcher,
-        )
         
         try:
-            await agent.run(input_message.prompt)
+            await self.agent.run(input_message.prompt)
             logger.info("Message processing completed successfully")
         except Exception as e:
             logger.error(f"Agent error: {e}", exc_info=True)
@@ -172,9 +178,12 @@ class AgentDaemon:
         if self._output_socket:
             self._output_socket.close()
             self._output_socket = None
-        if self._context:
-            self._context.term()
-            self._context = None
+        if self._async_context:
+            self._async_context.term()
+            self._async_context = None
+        if self._sync_context:
+            self._sync_context.term()
+            self._sync_context = None
         self.logger.info("AgentDaemon stopped")
         print("AgentDaemon stopped")
 
