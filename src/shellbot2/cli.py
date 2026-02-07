@@ -26,7 +26,7 @@ def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
     """
     log_file = datadir / "shellbot2.log"
     handlers: list[logging.Handler] = [logging.FileHandler(log_file)]
-    print(f"Logging to {log_file}, stream_to_stdout: {stream_to_stdout}")
+
     if stream_to_stdout:
         stdout_handler = logging.StreamHandler(sys.stdout)
         stdout_handler.setLevel(logging.INFO)
@@ -43,6 +43,17 @@ def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
 def get_pid_file(datadir: Path) -> Path:
     """Get the path to the daemon PID file."""
     return datadir / "daemon.pid"
+
+
+def get_ask_presence_file(datadir: Path) -> Path:
+    """Get the path to the daemon_ask presence file.
+    
+    This file exists while a daemon_ask session is actively reading from the
+    output socket. The daemon_watch background listener checks for this file
+    and suppresses its own display when it exists, so that daemon_ask has
+    exclusive control of the output.
+    """
+    return datadir / "daemon_ask.presence"
 
 
 async def run_prompt(args: argparse.Namespace) -> None:
@@ -170,25 +181,32 @@ async def daemon_ask(args: argparse.Namespace) -> None:
         "datetime": datetime.now().isoformat(),
     }
     
-    # Send the prompt via the input socket
     context = zmq.Context()
+    
+    # Connect to output socket FIRST (as SUB) so the subscription is
+    # established before the daemon begins responding to our prompt.
+    output_socket = context.socket(zmq.SUB)
+    output_socket.setsockopt(zmq.SUBSCRIBE, b"")
+    output_socket.connect(output_address)
+    
+    # Small delay to allow subscription to establish (ZeroMQ "slow joiner" issue)
+    time.sleep(0.1)
+    
+    # Write presence file so daemon_watch knows to suppress its display
+    presence_file = get_ask_presence_file(args.datadir)
+    presence_file.write_text(str(os.getpid()))
+    
+    # Now send the prompt via the input socket
     input_socket = context.socket(zmq.PUSH)
     input_socket.setsockopt(zmq.LINGER, 1000)  # Wait up to 1 second on close
     input_socket.connect(input_address)
     
-    # Small delay to allow connection to establish (ZeroMQ "slow joiner" issue)
+    # Small delay to allow connection to establish
     time.sleep(0.1)
     
     input_socket.send_json(message)
     logger.info("Prompt sent successfully")
     input_socket.close()
-    
-    # Connect to output socket to receive events
-    output_socket = context.socket(zmq.PULL)
-    output_socket.connect(output_address)
-    
-    # Small delay to allow connection to establish
-    time.sleep(0.1)
     
     rich_handler = RichOutputHandler()
     
@@ -215,6 +233,69 @@ async def daemon_ask(args: argparse.Namespace) -> None:
         logger.error(f"Error receiving events: {e}", exc_info=True)
         rich_handler.cleanup()
         raise
+    finally:
+        if presence_file.exists():
+            presence_file.unlink()
+        output_socket.close()
+        context.term()
+
+
+async def daemon_watch(args: argparse.Namespace) -> None:
+    """Persistently watch for daemon output and display when daemon_ask is not active.
+    
+    This is a long-running process meant to be left open in a terminal. It
+    subscribes to the daemon's output socket and displays events (e.g. subtask
+    alert responses) that would otherwise go unseen because no daemon_ask
+    session is running.
+    
+    When a daemon_ask session IS active (detected via a presence file), this
+    watcher silently discards events to avoid duplicate display.
+    """
+    if not daemon_is_running(args.datadir):
+        logger.error("Daemon is not running")
+        print("Error: Daemon is not running. Start it with 'cli daemon start'")
+        sys.exit(1)
+    
+    conf = load_conf(args.datadir)
+    output_address = conf.get('output_address', 'tcp://127.0.0.1:5556')
+    
+    context = zmq.Context()
+    output_socket = context.socket(zmq.SUB)
+    output_socket.setsockopt(zmq.SUBSCRIBE, b"")
+    output_socket.connect(output_address)
+    
+    logger.info(f"Watching daemon output at {output_address}")
+    
+    presence_file = get_ask_presence_file(args.datadir)
+    rich_handler = RichOutputHandler()
+    was_suppressed = False
+    
+    try:
+        while True:
+            event_json = output_socket.recv_string()
+            
+            ask_is_active = presence_file.exists()
+            
+            if ask_is_active:
+                # daemon_ask is running and will handle display
+                was_suppressed = True
+                continue
+            
+            # If we were suppressing and daemon_ask just finished, reset the
+            # handler so stale state (partial tool calls, live displays) from
+            # the suppressed run doesn't leak into the next displayed run.
+            if was_suppressed:
+                rich_handler.cleanup()
+                rich_handler = RichOutputHandler()
+                was_suppressed = False
+            
+            event = BaseEvent.model_validate_json(event_json)
+            rich_handler.handle(event)
+    
+    except KeyboardInterrupt:
+        logger.info("Watch interrupted by user")
+        rich_handler.cleanup()
+        print("\nStopped watching.")
     finally:
         output_socket.close()
         context.term()
@@ -280,6 +361,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='The prompt to send to the daemon'
     )
     
+    # daemon watch
+    daemon_subparsers.add_parser(
+        'watch',
+        help='Watch for daemon output (displays responses not handled by daemon ask)'
+    )
+    
     return parser
 
 
@@ -307,6 +394,8 @@ async def main() -> None:
             daemon_stop(args)
         elif args.daemon_command == 'ask':
             await daemon_ask(args)
+        elif args.daemon_command == 'watch':
+            await daemon_watch(args)
         else:
             parser.parse_args(['daemon', '--help'])
     else:

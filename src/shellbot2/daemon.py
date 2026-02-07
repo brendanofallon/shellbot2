@@ -96,7 +96,7 @@ class AgentDaemon:
         # calls handle() synchronously (not awaited), and zmq.asyncio sockets
         # return coroutines from send_string() which would silently drop msgs.
         self._sync_context = zmq.Context()
-        self._output_socket = self._sync_context.socket(zmq.PUSH)
+        self._output_socket = self._sync_context.socket(zmq.PUB)
         self._output_socket.bind(self.output_address)
         
         self.dispatcher = create_zeromq_dispatcher(socket=self._output_socket)
@@ -159,8 +159,6 @@ class AgentDaemon:
             return
         
         logger.info(f"Processing message from {input_message.source}: {input_message.prompt[:100]}...")
-        
-        
         
         try:
             await self.agent.run(input_message.prompt)
