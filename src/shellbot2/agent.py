@@ -33,6 +33,7 @@ from shellbot2.tools.imagetool import ImageTool
 from shellbot2.tools.memorytool import MemoryFunction
 from shellbot2.tools.docstoretool import DocStoreTool 
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
+from shellbot2.tools.subtasktool import SubTaskTool
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +73,6 @@ def create_tool_from_schema(tool_cls):
         takes_ctx=False,
     )
 
-def create_tools():
-    return [
-        create_tool_from_schema(ShellFunction()),
-        create_tool_from_schema(ReaderFunction()),
-        create_tool_from_schema(FastmailTool()),
-        #        create_tool_from_schema(CalendarTool()),
-        create_tool_from_schema(ImageTool()),
-        create_tool_from_schema(MemoryFunction()),
-        create_tool_from_schema(DocStoreTool()),
-        create_tool_from_schema(ClipboardFunction()),
-        create_tool_from_schema(PythonFunction()),
-        create_tool_from_schema(TavilySearchFunction()),
-    ]
-
 
 def load_conf(datadir: Path):
     conf = {}
@@ -104,14 +91,30 @@ class ShellBot3:
             thread_id = self.message_history.get_most_recent_thread_id()
             if thread_id is None:
                 thread_id = str(uuid.uuid4())
+        self.datadir = datadir
         self.thread_id = thread_id
         self.conf = load_conf(datadir)
         logger.info(f"Config: {self.conf}")
-        tools = create_tools()
-        tools.append(create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)))
+        tools = self._create_tools()
         self.agent = self._initialize_agent(self.conf, tools)
         self.event_dispatcher = event_dispatcher
     
+    def _create_tools(self):
+        return [
+            create_tool_from_schema(ShellFunction()),
+            create_tool_from_schema(ReaderFunction()),
+            create_tool_from_schema(FastmailTool()),
+            create_tool_from_schema(CalendarTool()),
+            create_tool_from_schema(ImageTool()),
+            create_tool_from_schema(MemoryFunction()),
+            create_tool_from_schema(DocStoreTool()),
+            create_tool_from_schema(ClipboardFunction()),
+            create_tool_from_schema(PythonFunction()),
+            create_tool_from_schema(TavilySearchFunction()),
+            create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules")),
+            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history))
+        ]
+
     def _initialize_agent(self, conf, tools):
         return Agent(
             conf.get('model', 'google-gla:gemini-3-flash-preview'),

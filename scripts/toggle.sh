@@ -11,7 +11,7 @@ CURRENT_MODE="NORMAL"  # Start in normal mode
 
 # Define the echo function for echo mode
 exec_shellbot() {
-    uv run --project $SHELLBOT_PATH $SHELLBOT_PATH/src/shellbot2/cli.py --datadir $SHELLBOT_DATADIR ask "$BUFFER"
+    uv run --project $SHELLBOT_PATH $SHELLBOT_PATH/src/shellbot2/cli.py --datadir $SHELLBOT_DATADIR daemon ask "$BUFFER"
 }
 
 # Create a custom accept-line widget
