@@ -225,7 +225,7 @@ class RichOutputHandler(EventHandler):
             if args_str:
                 try:
                     args_obj = json.loads(args_str)
-                    args_formatted = "\n".join(f"  {k}: {v}" for k, v in args_obj.items())
+                    args_formatted = "\n".join(f"   {k}: {v}" for k, v in args_obj.items())
                     panel_parts.append(Text(args_formatted, style="bright blue"))
                 except json.JSONDecodeError:
                     panel_parts.append(Text(f"  {args_str}", style="bright blue"))
@@ -259,7 +259,7 @@ class RichOutputHandler(EventHandler):
             if len(content) > 250:
                 display_content = content[:250] + "... (truncated)"
             
-            result_text = Text(f"Result: {display_content}", style="dim")
+            result_text = Text(f"    Result: {display_content}", style="dim")
             
             self.console.print(
                 Padding(
