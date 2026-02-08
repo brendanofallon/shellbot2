@@ -19,6 +19,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "rich>=13.0.0",
     "sqlalchemy>=2.0.45",
+    "streamlit>=1.54.0",
     "tavily>=1.1.0",
     "trafilatura>=2.0.0",
 ]
