@@ -1,23 +1,20 @@
 
-from dataclasses import dataclass
-import asyncio
 from functools import wraps
 from pathlib import Path
 import traceback
 import yaml
-import json
 import uuid
 import logging
+import boto3
 
+from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
+from pydantic_ai.models.bedrock import BedrockConverseModel
+from pydantic_ai.providers.bedrock import BedrockProvider
 from ag_ui.core import RunAgentInput, UserMessage
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai import (
     Agent, 
-    RunContext, 
-    AgentRunResultEvent, 
-    PartDeltaEvent, 
-    TextPartDelta, 
     AgentRunResult,
     Tool, 
     ModelMessagesTypeAdapter
@@ -35,6 +32,26 @@ from shellbot2.tools.docstoretool import DocStoreTool
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 
 logger = logging.getLogger(__name__)
+
+
+class BedrockConfig(BaseModel):
+    """Configuration for AWS Bedrock model. Used when provider is 'bedrock'."""
+
+    model: str = "anthropic.claude-3-5-sonnet-v1:0"
+    region_name: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+
+    def to_bedrock_model(self) -> BedrockConverseModel:
+        provider_kwargs: dict = {
+            "region_name": self.region_name,
+            "aws_access_key_id": self.aws_access_key_id,
+            "aws_secret_access_key": self.aws_secret_access_key,
+            "aws_session_token": self.aws_session_token,
+        }
+        provider = BedrockProvider(**{k: v for k, v in provider_kwargs.items() if v is not None})
+        return BedrockConverseModel(self.model, provider=provider)
 
 
 def safe_tool_call(func, tool_name: str):
@@ -76,7 +93,7 @@ def create_tools():
     return [
         create_tool_from_schema(ShellFunction()),
         create_tool_from_schema(ReaderFunction()),
-        create_tool_from_schema(FastmailTool()),
+        #   create_tool_from_schema(FastmailTool()),
         #        create_tool_from_schema(CalendarTool()),
         create_tool_from_schema(ImageTool()),
         create_tool_from_schema(MemoryFunction()),
@@ -96,6 +113,28 @@ def load_conf(datadir: Path):
         conf = yaml.safe_load(f)
     return conf
 
+def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
+    
+    # Create a boto3 session with the specified profile to get SSO credentials
+    boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
+    
+    # Get credentials from the session
+    credentials = boto_session.get_credentials()
+    if credentials is None:
+        raise RuntimeError(
+            f"Could not resolve AWS credentials from profile '{aws_profile}'. "
+            f"Make sure you've run: aws sso login --profile {aws_profile}"
+        )
+    
+    # Get frozen credentials (resolves any refresh tokens)
+    frozen_credentials = credentials.get_frozen_credentials()
+    provider = BedrockProvider(
+        region_name=region_name,
+        aws_access_key_id=frozen_credentials.access_key,
+        aws_secret_access_key=frozen_credentials.secret_key,
+        aws_session_token=frozen_credentials.token,
+    )
+    return BedrockConverseModel(model, provider=provider)
 
 class ShellBot3:
     def __init__(self, datadir: Path, thread_id: str = None, event_dispatcher: EventDispatcher = None):
@@ -113,13 +152,17 @@ class ShellBot3:
         self.event_dispatcher = event_dispatcher
     
     def _initialize_agent(self, conf, tools):
-        return Agent(
-            conf.get('model', 'google-gla:gemini-3-flash-preview'),
-            instructions=(
-                conf.get('instructions', "You are a friendly assistant")
-            ),
-            tools=tools,
-        )
+        instructions = conf.get("instructions", "You are a friendly assistant")
+        if conf.get("provider") == "bedrock":
+            bedrock_conf = conf.get("bedrock", {})
+            model = initialize_bedrock_model(conf.get("model"), bedrock_conf.get('region_name', 'us-west-2'))
+            return Agent(model=model, instructions=instructions, tools=tools)
+        else:
+            return Agent(
+                conf.get("model", "google-gla:gemini-3-flash-preview"),
+                instructions=instructions,
+                tools=tools,
+            )
 
     async def run(self, prompt: str):
         logger.info(f"Running prompt: {prompt[0:100]}...")

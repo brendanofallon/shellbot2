@@ -9,12 +9,15 @@ from pathlib import Path
 from datetime import datetime
 import time
 import zmq
+from dotenv import load_dotenv
 
 from ag_ui.core import BaseEvent
 from shellbot2.agent import ShellBot3, load_conf
 from shellbot2.event_dispatcher import create_rich_output_dispatcher, RichOutputHandler
 
-    
+
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
