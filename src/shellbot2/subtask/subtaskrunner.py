@@ -25,11 +25,11 @@ def load_module_from_file(module_path: Path):
     module_name = module_path.stem
     # Create a module specification from the file location
     spec = importlib.util.spec_from_file_location(module_name, module_path)
-    logger.debug(f"Spec: {spec}")
+    
     # Create a new module based on the specification
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    logger.debug(f"Module: {module}")
+    
     spec.loader.exec_module(module)
 
     return module
