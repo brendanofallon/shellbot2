@@ -20,6 +20,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.panel import Panel
+from rich.status import Status
 from rich.syntax import Syntax
 from rich.text import Text
 
@@ -128,6 +129,7 @@ class RichOutputHandler(EventHandler):
         self._current_message_id: str | None = None
         self._message_content: str = ""  # Accumulated markdown content
         self._live: Live | None = None  # Live display for streaming markdown
+        self._thinking_spinner: Status | None = None  # "Thinking...." spinner
     
     def _render_markdown(self, content: str):
         """Render markdown content with width constraint and left padding."""
@@ -135,22 +137,44 @@ class RichOutputHandler(EventHandler):
         constrained = Constrain(md, width=self.MARKDOWN_WIDTH)
         return Padding(constrained, (0, 0, 0, self.MARKDOWN_LEFT_PADDING))
     
+    def _show_spinner(self) -> None:
+        """Start the 'Thinking....' spinner if not already running."""
+        if self._thinking_spinner is None:
+            self._thinking_spinner = Status(
+                "Thinking....",
+                console=self.console,
+                spinner="dots",
+            )
+            self._thinking_spinner.start()
+
+    def _hide_spinner(self) -> None:
+        """Stop the 'Thinking....' spinner if it's running."""
+        if self._thinking_spinner is not None:
+            self._thinking_spinner.stop()
+            self._thinking_spinner = None
+
     def handle(self, event: BaseEvent) -> None:
         """Route event to appropriate handler method."""
         event_type = getattr(event, 'type', None)
         if event_type is None:
             return
-        
+
+        # Start "Thinking...." spinner on first event
+        self._show_spinner()
+
         # Convert enum to string if necessary
         if hasattr(event_type, 'value'):
             event_type = event_type.value
-        
+
         handler_method = getattr(self, f'_handle_{event_type.lower()}', None)
         if handler_method:
             handler_method(event)
-    
+        elif event_type in ("RUN_FINISHED", "RUN_ERROR"):
+            self._hide_spinner()
+
     def _handle_text_message_start(self, event: BaseEvent) -> None:
         """Handle start of text message - initialize Live display."""
+        self._hide_spinner()
         self._current_message_id = getattr(event, 'message_id', None)
         self._message_content = ""
         # Start Live display for streaming markdown
@@ -183,6 +207,7 @@ class RichOutputHandler(EventHandler):
     
     def _handle_tool_call_start(self, event: BaseEvent) -> None:
         """Handle start of tool call - store state, don't print yet."""
+        self._hide_spinner()
         tool_call_id = getattr(event, 'tool_call_id', None)
         tool_call_name = getattr(event, 'tool_call_name', None)
         
@@ -281,6 +306,7 @@ class RichOutputHandler(EventHandler):
     
     def cleanup(self) -> None:
         """Clean up any active Live displays. Call this if processing is interrupted."""
+        self._hide_spinner()
         if self._live:
             self._live.stop()
             self._live = None

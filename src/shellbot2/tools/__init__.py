@@ -6,6 +6,7 @@ This package contains all tool modules that can be used by assistants.
 
 from . import botfunctions, memorytool, docstoretool
 from . import fastmailtool, cal, imagetool, conversationsearchtool
+from . import filesearchtool
 
 __all__ = [
     'botfunctions',
@@ -15,4 +16,5 @@ __all__ = [
     'cal',
     'imagetool',
     'conversationsearchtool',
+    'filesearchtool',
 ]

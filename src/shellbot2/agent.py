@@ -31,6 +31,7 @@ from shellbot2.tools.memorytool import MemoryFunction
 from shellbot2.tools.docstoretool import DocStoreTool 
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 from shellbot2.tools.subtasktool import SubTaskTool
+from shellbot2.tools.filesearchtool import FileSearchFunction, TextReplaceFunction
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +143,8 @@ class ShellBot3:
         return [
             create_tool_from_schema(ShellFunction()),
             create_tool_from_schema(ReaderFunction()),
-            #create_tool_from_schema(FastmailTool()),
-            #create_tool_from_schema(CalendarTool()),
+            create_tool_from_schema(FastmailTool()),
+            create_tool_from_schema(CalendarTool()),
             create_tool_from_schema(ImageTool()),
             create_tool_from_schema(MemoryFunction()),
             create_tool_from_schema(DocStoreTool()),
@@ -151,7 +152,9 @@ class ShellBot3:
             create_tool_from_schema(PythonFunction()),
             create_tool_from_schema(TavilySearchFunction()),
             create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules", self.conf.get('input_address', 'tcp://127.0.0.1:5555'))),
-            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history))
+            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)),
+            create_tool_from_schema(FileSearchFunction()),
+            create_tool_from_schema(TextReplaceFunction()),
         ]
 
     def _initialize_agent(self, conf, tools):
