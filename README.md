@@ -265,28 +265,46 @@ instructions: >
   - Higher values provide more context but increase token usage
   - Example: `recent_messages_limit: 10`
 
-#### Tools
+#### Tools (Dynamic Loading)
 
-- **`tools`** (optional): List of tools available to the agent
-  - Each tool name corresponds to a tool implementation
-  - Some tools (like `document-store`) support additional configuration
-  - Available tools:
-    - `shell`: Execute shell commands
-    - `python`: Execute Python code
-    - `tavilysearch`: Web search (requires Tavily API key)
-    - `reader`: Read web pages and documents
-    - `clipboard`: Access system clipboard
-    - `fastmail`: Email integration (requires Fastmail credentials)
-    - `calendar`: Calendar integration (requires Google Calendar credentials)
-    - `image-generator`: Generate images
-    - `memory`: Store and retrieve persistent information
-    - `document-store`: Semantic search over documents (requires `store_id`)
+- **`tools`** (optional): List of tools available to the agent.
+  Tools are **dynamically loaded** from a central registry based on this list.
+  Only the tools you list here will be initialized — this keeps the agent
+  lightweight, avoids unnecessary API-key requirements, and makes it easy to
+  create purpose-built agents with different tool sets.
+
+  If the `tools` key is **omitted entirely**, all registered tools are loaded
+  for backward compatibility.  If it is present but **empty** (`tools: []`),
+  no tools are loaded.
+
+  Each entry is either a plain tool name (string) or a single-key dictionary
+  when the tool requires extra configuration:
+
+  - `shell`: Execute shell commands
+  - `python`: Execute Python code
+  - `tavilysearch`: Web search (requires Tavily API key)
+  - `reader`: Read web pages and documents
+  - `clipboard`: Access system clipboard
+  - `fastmail`: Email integration (requires Fastmail credentials)
+  - `calendar`: Calendar integration (requires Google Calendar credentials)
+  - `image-generator`: Generate images
+  - `memory`: Store and retrieve persistent information
+  - `document-store`: Semantic search over documents (requires `store_id`)
+  - `subtasks`: Create and manage background subtasks
+  - `conversation-search`: Search past conversation history
+  - `file_search`: Grep files for regex patterns
+  - `text_replace`: Literal string replacement in files
+
+  If a tool name in the config is not recognized, or if a tool fails to
+  initialize (e.g. missing API key), it is **skipped with a warning** rather
+  than crashing the agent.
 
 Example with tool configuration:
 ```yaml
 tools:
     - shell
     - python
+    - memory
     - document-store:
         store_id: 903cb699-de81-4507-9e9a-17befc2c6ac8
 ```
