@@ -21,17 +21,9 @@ from pydantic_ai import (
 )
 from pydantic_ai.messages import ModelRequest
         
-from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
-from shellbot2.tools.fastmailtool import FastmailTool
-from shellbot2.tools.cal import CalendarTool
-from shellbot2.tools.imagetool import ImageTool
-from shellbot2.tools.memorytool import MemoryFunction
-from shellbot2.tools.docstoretool import DocStoreTool 
-from shellbot2.tools.conversationsearchtool import ConversationSearchTool
-from shellbot2.tools.subtasktool import SubTaskTool
-from shellbot2.tools.filesearchtool import FileSearchFunction, TextReplaceFunction
+from shellbot2.tools import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -140,22 +132,75 @@ class ShellBot3:
         self.event_dispatcher = event_dispatcher
     
     def _create_tools(self):
-        return [
-            create_tool_from_schema(ShellFunction()),
-            create_tool_from_schema(ReaderFunction()),
-            create_tool_from_schema(FastmailTool()),
-            create_tool_from_schema(CalendarTool()),
-            create_tool_from_schema(ImageTool()),
-            create_tool_from_schema(MemoryFunction()),
-            create_tool_from_schema(DocStoreTool()),
-            create_tool_from_schema(ClipboardFunction()),
-            create_tool_from_schema(PythonFunction()),
-            create_tool_from_schema(TavilySearchFunction()),
-            create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules", self.conf.get('input_address', 'tcp://127.0.0.1:5555'))),
-            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)),
-            create_tool_from_schema(FileSearchFunction()),
-            create_tool_from_schema(TextReplaceFunction()),
-        ]
+        """Create tool instances based on the ``tools`` list in the config.
+
+        Each entry in ``conf['tools']`` is either a plain string (the tool
+        name) or a single-key dict whose key is the tool name and whose value
+        is a dict of tool-specific configuration.  For example::
+
+            tools:
+                - shell
+                - python
+                - document-store:
+                    store_id: abc-123
+
+        If ``tools`` is missing or empty in the config, **all** registered
+        tools are loaded (preserving backward compatibility).
+        """
+        tools_conf = self.conf.get("tools", None)
+
+        # Injected runtime dependencies available to every tool factory
+        runtime_cfg = {
+            "_datadir": self.datadir,
+            "_zmq_input_address": self.conf.get("input_address", "tcp://127.0.0.1:5555"),
+            "_message_history": self.message_history,
+        }
+
+        # If no tools list in config, load everything (backward compat)
+        # Note: explicitly check for None so an empty list [] loads zero tools
+        if tools_conf is None:
+            logger.info("No 'tools' list in config — loading all registered tools")
+            tools = []
+            for name, factory in TOOL_REGISTRY.items():
+                try:
+                    tool_instance = factory({**runtime_cfg})
+                    tools.append(create_tool_from_schema(tool_instance))
+                except Exception as e:
+                    logger.warning(f"Skipping tool '{name}' (failed to initialize): {e}")
+            return tools
+
+        # Parse the tools list and instantiate only requested tools
+        tools = []
+        for entry in tools_conf:
+            if isinstance(entry, str):
+                tool_name = entry
+                tool_cfg = {}
+            elif isinstance(entry, dict):
+                # Single-key dict: {"document-store": {"store_id": "..."}}
+                tool_name = next(iter(entry))
+                tool_cfg = entry[tool_name] or {}
+            else:
+                logger.warning(f"Ignoring unrecognized tool config entry: {entry}")
+                continue
+
+            if tool_name not in TOOL_REGISTRY:
+                logger.warning(
+                    f"Tool '{tool_name}' is listed in config but not found in "
+                    f"TOOL_REGISTRY. Available tools: {list(TOOL_REGISTRY.keys())}"
+                )
+                continue
+
+            # Merge runtime dependencies with per-tool config
+            merged_cfg = {**runtime_cfg, **tool_cfg}
+            try:
+                tool_instance = TOOL_REGISTRY[tool_name](merged_cfg)
+                tools.append(create_tool_from_schema(tool_instance))
+                logger.info(f"Loaded tool: {tool_name}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+
+        logger.info(f"Loaded {len(tools)} tool(s) from config: {[e if isinstance(e, str) else next(iter(e)) for e in tools_conf]}")
+        return tools
 
     def _initialize_agent(self, conf, tools):
         instructions = conf.get("instructions", "You are a friendly assistant")
