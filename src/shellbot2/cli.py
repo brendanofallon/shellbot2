@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 from ag_ui.core import BaseEvent
 from shellbot2.agent import ShellBot3, load_conf
 from shellbot2.event_dispatcher import create_rich_output_dispatcher, RichOutputHandler
+from shellbot2.memory_extractor import MemoryExtractor
+from shellbot2.message_history import MessageHistory
+from shellbot2.tools.memorytool import MemoryTool
 
 load_dotenv()
 
@@ -303,6 +306,43 @@ async def daemon_watch(args: argparse.Namespace) -> None:
         context.term()
 
 
+async def extract_memories(args: argparse.Namespace) -> None:
+    """Extract memories from conversation history and store them."""
+    logger = logging.getLogger(__name__)
+
+    conf = load_conf(args.datadir)
+    message_history = MessageHistory(args.datadir / "message_history.db")
+    memory_tool = MemoryTool()
+
+    thread_id = getattr(args, "thread_id", None)
+    if thread_id is None:
+        thread_id = message_history.get_most_recent_thread_id()
+        if thread_id is None:
+            print("No conversation threads found in message history.")
+            return
+
+    limit = getattr(args, "limit", 10)
+
+    extractor = MemoryExtractor(
+        message_history=message_history,
+        memory_tool=memory_tool,
+        conf=conf,
+    )
+
+    logger.info(f"Extracting memories from thread {thread_id} (last {limit} interactions)")
+    stored = await extractor.extract_and_store(thread_id, interaction_limit=limit)
+
+    if not stored:
+        print("No new memories extracted.")
+        return
+
+    print(f"\n  Extracted {len(stored)} memories:\n")
+    for mem in stored:
+        label = mem.category.upper()
+        print(f"  [{label}]  {mem.key}")
+        print(f"          {mem.value}\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -368,7 +408,25 @@ def build_parser() -> argparse.ArgumentParser:
         'watch',
         help='Watch for daemon output (displays responses not handled by daemon ask)'
     )
-    
+
+    # Memory extraction command
+    mem_parser = subparsers.add_parser(
+        'extract-memories',
+        help='Extract and store memories from recent conversation history'
+    )
+    mem_parser.add_argument(
+        '--thread-id',
+        type=str,
+        default=None,
+        help='Thread ID to extract from (default: most recent thread)'
+    )
+    mem_parser.add_argument(
+        '--limit',
+        type=int,
+        default=10,
+        help='Number of recent interactions to analyze (default: 10)'
+    )
+
     return parser
 
 
@@ -400,6 +458,8 @@ async def main() -> None:
             await daemon_watch(args)
         else:
             parser.parse_args(['daemon', '--help'])
+    elif args.command == 'extract-memories':
+        await extract_memories(args)
     else:
         parser.print_help()
 

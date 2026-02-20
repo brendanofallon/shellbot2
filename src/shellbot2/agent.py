@@ -31,6 +31,7 @@ from shellbot2.tools.memorytool import MemoryFunction
 from shellbot2.tools.docstoretool import DocStoreTool 
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 from shellbot2.tools.subtasktool import SubTaskTool
+from shellbot2.tools.filesearchtool import FileSearchFunction, TextReplaceFunction
 
 logger = logging.getLogger(__name__)
 
@@ -100,21 +101,28 @@ def load_conf(datadir: Path):
         conf = yaml.safe_load(f)
     return conf
 
-def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
-    
-    # Create a boto3 session with the specified profile to get SSO credentials
-    boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
-    
-    # Get credentials from the session
+def verify_aws_credentials(boto_session: boto3.Session, profile_name: str):
+    """Verify that AWS credentials are present and not expired via a lightweight STS call."""
     credentials = boto_session.get_credentials()
     if credentials is None:
         raise RuntimeError(
-            f"Could not resolve AWS credentials from profile '{aws_profile}'. "
-            f"Make sure you've run: aws sso login --profile {aws_profile}"
+            f"Could not resolve AWS credentials from profile '{profile_name}'. "
+            f"Make sure you've run: aws sso login --profile {profile_name}"
         )
-    
-    # Get frozen credentials (resolves any refresh tokens)
     frozen_credentials = credentials.get_frozen_credentials()
+    if not frozen_credentials.access_key or not frozen_credentials.secret_key:
+        raise RuntimeError(
+            f"AWS credentials from profile '{profile_name}' are incomplete (missing access key or secret key). "
+            f"Try: aws sso login --profile {profile_name}"
+        )
+    sts = boto_session.client("sts")
+    sts.get_caller_identity()
+    return frozen_credentials
+
+
+def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
+    boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
+    frozen_credentials = verify_aws_credentials(boto_session, aws_profile)
     provider = BedrockProvider(
         region_name=region_name,
         aws_access_key_id=frozen_credentials.access_key,
@@ -142,8 +150,8 @@ class ShellBot3:
         return [
             create_tool_from_schema(ShellFunction()),
             create_tool_from_schema(ReaderFunction()),
-            #create_tool_from_schema(FastmailTool()),
-            #create_tool_from_schema(CalendarTool()),
+            create_tool_from_schema(FastmailTool()),
+            create_tool_from_schema(CalendarTool()),
             create_tool_from_schema(ImageTool()),
             create_tool_from_schema(MemoryFunction()),
             create_tool_from_schema(DocStoreTool()),
@@ -151,7 +159,9 @@ class ShellBot3:
             create_tool_from_schema(PythonFunction()),
             create_tool_from_schema(TavilySearchFunction()),
             create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules", self.conf.get('input_address', 'tcp://127.0.0.1:5555'))),
-            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history))
+            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)),
+            create_tool_from_schema(FileSearchFunction()),
+            create_tool_from_schema(TextReplaceFunction()),
         ]
 
     def _initialize_agent(self, conf, tools):
