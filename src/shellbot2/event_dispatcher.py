@@ -111,8 +111,14 @@ class RichOutputHandler(EventHandler):
     Global handler that prints text and tool calls using Rich formatting.
     
     This handler tracks state across events to properly format:
-    - Text messages: rendered as Markdown using Live display for streaming updates
+    - Text messages: rendered as Markdown using a transient Live display during
+      streaming, with a single permanent print when the message completes.
     - Tool calls: displayed in colored panels with name, arguments, and results
+    
+    The Live display uses transient=True and vertical_overflow="crop" so that
+    streaming content never pollutes terminal scrollback. A status panel at the
+    bottom of the Live region can display ephemeral information (token counts,
+    progress, etc.) that disappears with the Live display on completion.
     """
     
     MARKDOWN_WIDTH = 100
@@ -125,21 +131,54 @@ class RichOutputHandler(EventHandler):
             console: Rich Console instance (creates one if not provided).
         """
         self.console = console or Console()
-        self._tool_calls: dict[str, dict] = {}  # Track tool call state by ID
+        self._tool_calls: dict[str, dict] = {}
         self._current_message_id: str | None = None
-        self._message_content: str = ""  # Accumulated markdown content
-        self._live: Live | None = None  # Live display for streaming markdown
-        self._thinking_spinner: Status | None = None  # "Thinking...." spinner
+        self._message_content: str = ""
+        self._live: Live | None = None
+        self._thinking_spinner: Status | None = None
+        self._status_message: str = ""
     
+    def set_status(self, message: str) -> None:
+        """Set the status message shown in the ephemeral panel during streaming.
+        
+        The status panel is only visible while a Live display is active and
+        disappears automatically when streaming completes. Set to an empty
+        string to hide the panel.
+        
+        Args:
+            message: Status text to display (e.g. token counts, progress).
+        """
+        self._status_message = message
+        if self._live:
+            self._live.update(self._build_live_renderable())
+
     def _render_markdown(self, content: str):
         """Render markdown content with width constraint and left padding."""
         md = Markdown(content)
         constrained = Constrain(md, width=self.MARKDOWN_WIDTH)
         return Padding(constrained, (0, 0, 0, self.MARKDOWN_LEFT_PADDING))
-    
+
+    def _render_status_panel(self):
+        """Render the ephemeral status panel shown below content during streaming."""
+        return Padding(
+            Text(self._status_message, style="dim italic"),
+            (0, 0, 0, self.MARKDOWN_LEFT_PADDING),
+        )
+
+    def _build_live_renderable(self):
+        """Compose the Live display: markdown content plus optional status panel."""
+        md = self._render_markdown(self._message_content)
+        if self._status_message:
+            return Group(md, self._render_status_panel())
+        return md
+
     def _show_spinner(self) -> None:
-        """Start the 'Thinking....' spinner if not already running."""
-        if self._thinking_spinner is None:
+        """Start the 'Thinking....' spinner if not already running.
+        
+        Skips if a Live display is active to avoid two Rich Live contexts
+        competing for the same console.
+        """
+        if self._thinking_spinner is None and self._live is None:
             self._thinking_spinner = Status(
                 "Thinking....",
                 console=self.console,
@@ -153,16 +192,23 @@ class RichOutputHandler(EventHandler):
             self._thinking_spinner.stop()
             self._thinking_spinner = None
 
+    def _finalize_live(self) -> None:
+        """Stop the transient Live display and permanently print accumulated content."""
+        if self._live:
+            self._live.stop()
+            self._live = None
+        if self._message_content:
+            self.console.print(self._render_markdown(self._message_content))
+        self._status_message = ""
+
     def handle(self, event: BaseEvent) -> None:
         """Route event to appropriate handler method."""
         event_type = getattr(event, 'type', None)
         if event_type is None:
             return
 
-        # Start "Thinking...." spinner on first event
         self._show_spinner()
 
-        # Convert enum to string if necessary
         if hasattr(event_type, 'value'):
             event_type = event_type.value
 
@@ -173,37 +219,33 @@ class RichOutputHandler(EventHandler):
             self._hide_spinner()
 
     def _handle_text_message_start(self, event: BaseEvent) -> None:
-        """Handle start of text message - initialize Live display."""
+        """Handle start of text message - initialize transient Live display."""
         self._hide_spinner()
         self._current_message_id = getattr(event, 'message_id', None)
         self._message_content = ""
-        # Start Live display for streaming markdown
         self._live = Live(
-            self._render_markdown(""),
+            self._build_live_renderable(),
             console=self.console,
             refresh_per_second=10,
-            vertical_overflow="visible",
+            vertical_overflow="crop",
+            transient=True,
         )
         self._live.start()
     
     def _handle_text_message_content(self, event: BaseEvent) -> None:
-        """Handle text message content - accumulate and update Live markdown."""
+        """Handle text message content - accumulate and update Live display."""
         delta = getattr(event, 'delta', None)
         if delta:
             self._message_content += delta
             if self._live:
-                self._live.update(self._render_markdown(self._message_content))
+                self._live.update(self._build_live_renderable())
     
     def _handle_text_message_end(self, event: BaseEvent) -> None:
-        """Handle end of text message - finalize Live display."""
-        if self._live:
-            # Final update with complete content
-            self._live.update(self._render_markdown(self._message_content))
-            self._live.stop()
-            self._live = None
+        """Handle end of text message - stop Live and permanently print the result."""
+        self._finalize_live()
         self._current_message_id = None
         self._message_content = ""
-        self.console.print()  # Add spacing after message
+        self.console.print()
     
     def _handle_tool_call_start(self, event: BaseEvent) -> None:
         """Handle start of tool call - store state, don't print yet."""
@@ -211,10 +253,8 @@ class RichOutputHandler(EventHandler):
         tool_call_id = getattr(event, 'tool_call_id', None)
         tool_call_name = getattr(event, 'tool_call_name', None)
         
-        # If we're in a Live context, stop it temporarily for tool output
         if self._live:
-            self._live.stop()
-            self._live = None
+            self._finalize_live()
         
         if tool_call_id:
             self._tool_calls[tool_call_id] = {
@@ -310,6 +350,7 @@ class RichOutputHandler(EventHandler):
         if self._live:
             self._live.stop()
             self._live = None
+        self._status_message = ""
 
 
 class EventDispatcher:
