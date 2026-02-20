@@ -101,21 +101,28 @@ def load_conf(datadir: Path):
         conf = yaml.safe_load(f)
     return conf
 
-def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
-    
-    # Create a boto3 session with the specified profile to get SSO credentials
-    boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
-    
-    # Get credentials from the session
+def verify_aws_credentials(boto_session: boto3.Session, profile_name: str):
+    """Verify that AWS credentials are present and not expired via a lightweight STS call."""
     credentials = boto_session.get_credentials()
     if credentials is None:
         raise RuntimeError(
-            f"Could not resolve AWS credentials from profile '{aws_profile}'. "
-            f"Make sure you've run: aws sso login --profile {aws_profile}"
+            f"Could not resolve AWS credentials from profile '{profile_name}'. "
+            f"Make sure you've run: aws sso login --profile {profile_name}"
         )
-    
-    # Get frozen credentials (resolves any refresh tokens)
     frozen_credentials = credentials.get_frozen_credentials()
+    if not frozen_credentials.access_key or not frozen_credentials.secret_key:
+        raise RuntimeError(
+            f"AWS credentials from profile '{profile_name}' are incomplete (missing access key or secret key). "
+            f"Try: aws sso login --profile {profile_name}"
+        )
+    sts = boto_session.client("sts")
+    sts.get_caller_identity()
+    return frozen_credentials
+
+
+def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
+    boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
+    frozen_credentials = verify_aws_credentials(boto_session, aws_profile)
     provider = BedrockProvider(
         region_name=region_name,
         aws_access_key_id=frozen_credentials.access_key,
