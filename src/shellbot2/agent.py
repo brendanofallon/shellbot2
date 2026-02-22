@@ -24,6 +24,7 @@ from pydantic_ai.messages import ModelRequest
 from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
+from shellbot2.usage_tracker import UsageTracker
 from shellbot2.tools.fastmailtool import FastmailTool
 from shellbot2.tools.cal import CalendarTool
 from shellbot2.tools.imagetool import ImageTool
@@ -134,6 +135,7 @@ def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_pro
 class ShellBot3:
     def __init__(self, datadir: Path, thread_id: str = None, event_dispatcher: EventDispatcher = None):
         self.message_history = MessageHistory(datadir / "message_history.db")
+        self.usage_tracker = UsageTracker(datadir / "usage.db")
         if thread_id is None:
             thread_id = self.message_history.get_most_recent_thread_id()
             if thread_id is None:
@@ -324,5 +326,17 @@ class ShellBot3:
                 f"Response: {usage.response_tokens}, "
                 f"Total: {usage.total_tokens}"
             )
+            # Persist usage record
+            model_name = self.conf.get("model", "unknown")
+            try:
+                self.usage_tracker.record(
+                    thread_id=self.thread_id,
+                    model=model_name,
+                    request_tokens=usage.request_tokens or 0,
+                    response_tokens=usage.response_tokens or 0,
+                    total_tokens=usage.total_tokens or 0,
+                )
+            except Exception as e:
+                logger.error(f"Failed to record usage: {e}")
         
         return runresult

@@ -6,7 +6,7 @@ import signal
 import sys
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import zmq
 from dotenv import load_dotenv
@@ -17,6 +17,7 @@ from shellbot2.event_dispatcher import create_rich_output_dispatcher, RichOutput
 from shellbot2.memory_extractor import MemoryExtractor
 from shellbot2.message_history import MessageHistory
 from shellbot2.tools.memorytool import MemoryTool
+from shellbot2.usage_tracker import UsageTracker, format_usage_report
 
 load_dotenv()
 
@@ -350,6 +351,27 @@ async def extract_memories(args: argparse.Namespace) -> None:
         print(f"          {mem.value}\n")
 
 
+async def show_stats(args: argparse.Namespace) -> None:
+    """Display token usage statistics."""
+    tracker = UsageTracker(args.datadir / "usage.db")
+
+    since = None
+    period_label = None
+    if hasattr(args, 'period') and args.period:
+        period = args.period
+        now = datetime.now()
+        if period == "today":
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            since = now - timedelta(days=7)
+        elif period == "month":
+            since = now - timedelta(days=30)
+        # "all" leaves since=None
+
+    report = format_usage_report(tracker, since=since)
+    print(report)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -439,6 +461,19 @@ def build_parser() -> argparse.ArgumentParser:
         help='Number of recent interactions to analyze (default: 10)'
     )
 
+    # Stats command
+    stats_parser = subparsers.add_parser(
+        'stats',
+        help='Show token usage statistics'
+    )
+    stats_parser.add_argument(
+        '--period',
+        type=str,
+        choices=['today', 'week', 'month', 'all'],
+        default='all',
+        help='Time period for stats (default: all)'
+    )
+
     return parser
 
 
@@ -472,6 +507,8 @@ async def main() -> None:
             parser.parse_args(['daemon', '--help'])
     elif args.command == 'extract-memories':
         await extract_memories(args)
+    elif args.command == 'stats':
+        await show_stats(args)
     else:
         parser.print_help()
 
