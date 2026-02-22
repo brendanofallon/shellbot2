@@ -32,6 +32,7 @@ class InputMessage:
     prompt: str
     source: str
     datetime: str
+    thread_id: str | None = None
     
     @classmethod
     def from_json(cls, json_str: str) -> "InputMessage":
@@ -56,6 +57,7 @@ class InputMessage:
             prompt=data["prompt"],
             source=data["source"],
             datetime=data["datetime"],
+            thread_id=data.get("thread_id"),
         )
 
 
@@ -158,6 +160,10 @@ class AgentDaemon:
             self.logger.error(f"Invalid message received: {e}")
             return
         
+        if input_message.thread_id is not None:
+            logger.info(f"Switching agent to thread: {input_message.thread_id}")
+            self.agent.thread_id = input_message.thread_id
+
         logger.info(f"Processing message from {input_message.source}: {input_message.prompt[:100]}...")
         
         try:
