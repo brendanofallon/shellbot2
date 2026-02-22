@@ -306,6 +306,158 @@ async def daemon_watch(args: argparse.Namespace) -> None:
         context.term()
 
 
+CHAT_HELP = """\
+[bold cyan]ShellBot2 Interactive Chat[/bold cyan]
+Type your message and press Enter to send. Available slash commands:
+  [green]/new[/green]      Start a new conversation thread
+  [green]/thread[/green]   Show the current thread ID
+  [green]/threads[/green]  List all conversation thread IDs
+  [green]/help[/green]     Show this help message
+  [green]/quit[/green]     Exit chat  (also Ctrl-C or Ctrl-D)
+"""
+
+SLASH_COMMANDS = {"/new", "/thread", "/threads", "/help", "/quit", "/exit"}
+
+
+def _get_input_gum(prompt_str: str) -> str | None:
+    """Try to get input via `gum input`. Returns None if gum is unavailable or user cancels."""
+    import shutil
+    import subprocess
+    if not shutil.which("gum"):
+        return None
+    try:
+        result = subprocess.run(
+            ["gum", "input", "--placeholder", "Type a message  (or /help for commands)…",
+             "--prompt", prompt_str, "--width", "100"],
+            capture_output=True, text=True
+        )
+        # gum exits with code 130 on Ctrl-C and 1 on Escape
+        if result.returncode != 0:
+            return ""   # treat as empty / cancelled
+        return result.stdout.rstrip("\n")
+    except Exception:
+        return None
+
+
+async def run_chat(args: argparse.Namespace) -> None:
+    """Run an interactive multi-turn chat session directly (no daemon required).
+
+    The session maintains a single conversation thread across turns. Slash
+    commands give lightweight thread management without leaving the REPL:
+
+        /new      — start a fresh thread
+        /thread   — print the current thread ID
+        /threads  — list all thread IDs in the history database
+        /help     — show available commands
+        /quit     — exit the session
+    """
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.rule import Rule
+
+    console = Console()
+    console.print(Markdown(CHAT_HELP.replace("[bold cyan]", "# ").replace("[/bold cyan]", "")
+                            .replace("[green]", "").replace("[/green]", "")))
+
+    thread_id: str | None = None
+    if getattr(args, "new_thread", False):
+        thread_id = str(uuid.uuid4())
+        logger.info(f"Chat starting new thread: {thread_id}")
+
+    # We'll build the agent lazily (so we can re-create it on /new)
+    event_dispatcher = create_rich_output_dispatcher(console)
+    agent = ShellBot3(args.datadir, thread_id=thread_id, event_dispatcher=event_dispatcher)
+    thread_id = agent.thread_id  # capture whatever thread was selected
+
+    console.print(f"[dim]Thread: {thread_id}[/dim]")
+    console.print(Rule(style="dim"))
+
+    use_gum = True   # will be set to False if gum is not found on first attempt
+
+    while True:
+        prompt_str = "🤖 > "
+
+        # --- Read input ---
+        raw: str | None = None
+        if use_gum:
+            raw = _get_input_gum(prompt_str)
+            if raw is None:
+                # gum not available; fall back permanently
+                use_gum = False
+
+        if not use_gum:
+            try:
+                raw = input(prompt_str)
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Goodbye![/dim]")
+                break
+
+        if raw is None:
+            # Shouldn't happen, but be safe
+            break
+
+        # gum cancelled with Ctrl-C / Escape returns empty string
+        if raw == "" and use_gum:
+            console.print("\n[dim]Goodbye![/dim]")
+            break
+
+        text = raw.strip()
+
+        if not text:
+            continue
+
+        # --- Slash command handling ---
+        if text.startswith("/"):
+            cmd = text.split()[0].lower()
+
+            if cmd in ("/quit", "/exit"):
+                console.print("[dim]Goodbye![/dim]")
+                break
+
+            elif cmd == "/help":
+                console.print(Markdown(CHAT_HELP.replace("[bold cyan]", "# ").replace("[/bold cyan]", "")
+                                        .replace("[green]", "").replace("[/green]", "")))
+
+            elif cmd == "/thread":
+                console.print(f"[dim]Current thread: {agent.thread_id}[/dim]")
+
+            elif cmd == "/threads":
+                mh = MessageHistory(args.datadir / "message_history.db")
+                ids = mh.get_thread_ids()
+                if not ids:
+                    console.print("[dim]No threads found.[/dim]")
+                else:
+                    console.print("[dim]All threads:[/dim]")
+                    for tid in ids:
+                        marker = " ← current" if tid == agent.thread_id else ""
+                        console.print(f"  [dim]{tid}{marker}[/dim]")
+
+            elif cmd == "/new":
+                new_tid = str(uuid.uuid4())
+                event_dispatcher = create_rich_output_dispatcher(console)
+                agent = ShellBot3(args.datadir, thread_id=new_tid, event_dispatcher=event_dispatcher)
+                thread_id = agent.thread_id
+                console.print(Rule(style="dim"))
+                console.print(f"[dim]New thread started: {thread_id}[/dim]")
+                console.print(Rule(style="dim"))
+
+            else:
+                console.print(f"[yellow]Unknown command '{cmd}'. Type /help for available commands.[/yellow]")
+
+            continue
+
+        # --- Normal prompt ---
+        console.print(Rule(style="dim"))
+        try:
+            await agent.run(text)
+        except KeyboardInterrupt:
+            console.print("\n[dim](interrupted)[/dim]")
+        except Exception as e:
+            logger.error(f"Error running prompt: {e}", exc_info=True)
+            console.print(f"[red]Error: {e}[/red]")
+        console.print(Rule(style="dim"))
+
+
 async def extract_memories(args: argparse.Namespace) -> None:
     """Extract memories from conversation history and store them."""
     logger = logging.getLogger(__name__)
@@ -409,6 +561,17 @@ def build_parser() -> argparse.ArgumentParser:
         help='Watch for daemon output (displays responses not handled by daemon ask)'
     )
 
+    # Interactive chat command
+    chat_parser = subparsers.add_parser(
+        'chat',
+        help='Start an interactive multi-turn chat session (no daemon required)'
+    )
+    chat_parser.add_argument(
+        '--new-thread',
+        action='store_true',
+        help='Begin a new conversation thread instead of resuming the most recent one'
+    )
+
     # Memory extraction command
     mem_parser = subparsers.add_parser(
         'extract-memories',
@@ -447,6 +610,8 @@ async def main() -> None:
     
     if args.command == 'ask':
         await run_prompt(args)
+    elif args.command == 'chat':
+        await run_chat(args)
     elif args.command == 'daemon':
         if args.daemon_command == 'start':
             await daemon_start(args)
