@@ -168,7 +168,8 @@ class ShellBot3:
         instructions = conf.get("instructions", "You are a friendly assistant")
         if conf.get("provider") == "bedrock":
             bedrock_conf = conf.get("bedrock", {})
-            model = initialize_bedrock_model(conf.get("model"), bedrock_conf.get('region_name', 'us-west-2'))
+            model = initialize_bedrock_model(conf.get("model"), aws_profile=bedrock_conf.get("profile", "BedrockAPI-Access-470052372761"), aws_region=bedrock_conf.get('region', 'us-west-2') )
+            
             return Agent(model=model, instructions=instructions, tools=tools)
         else:
             return Agent(
