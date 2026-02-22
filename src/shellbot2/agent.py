@@ -147,22 +147,107 @@ class ShellBot3:
         self.event_dispatcher = event_dispatcher
     
     def _create_tools(self):
-        return [
-            create_tool_from_schema(ShellFunction()),
-            create_tool_from_schema(ReaderFunction()),
-            create_tool_from_schema(FastmailTool()),
-            create_tool_from_schema(CalendarTool()),
-            create_tool_from_schema(ImageTool()),
-            create_tool_from_schema(MemoryFunction()),
-            create_tool_from_schema(DocStoreTool()),
-            create_tool_from_schema(ClipboardFunction()),
-            create_tool_from_schema(PythonFunction()),
-            create_tool_from_schema(TavilySearchFunction()),
-            create_tool_from_schema(SubTaskTool(self.datadir / "subtask_modules", self.conf.get('input_address', 'tcp://127.0.0.1:5555'))),
-            create_tool_from_schema(ConversationSearchTool(message_history=self.message_history)),
-            create_tool_from_schema(FileSearchFunction()),
-            create_tool_from_schema(TextReplaceFunction()),
-        ]
+        import importlib.util
+        import sys
+        
+        # 1. Gather all built-in tools
+        available_tools = {
+            ShellFunction.toolname: ShellFunction,
+            ReaderFunction.toolname: ReaderFunction,
+            FastmailTool.toolname: FastmailTool,
+            CalendarTool.toolname: CalendarTool,
+            ImageTool.toolname: ImageTool,
+            MemoryFunction.toolname: MemoryFunction,
+            DocStoreTool.toolname: DocStoreTool,
+            ClipboardFunction.toolname: ClipboardFunction,
+            PythonFunction.toolname: PythonFunction,
+            TavilySearchFunction.toolname: TavilySearchFunction,
+            SubTaskTool.toolname: SubTaskTool,
+            ConversationSearchTool.toolname: ConversationSearchTool,
+            FileSearchFunction.toolname: FileSearchFunction,
+            TextReplaceFunction.toolname: TextReplaceFunction,
+        }
+
+        # 2. Discover custom tools in self.datadir / "tools"
+        custom_tools_dir = self.datadir / "tools"
+        if custom_tools_dir.exists() and custom_tools_dir.is_dir():
+            for py_file in custom_tools_dir.glob("*.py"):
+                if py_file.name.startswith("__"):
+                    continue
+                try:
+                    module_name = py_file.stem
+                    spec = importlib.util.spec_from_file_location(module_name, py_file)
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+                    
+                    # Inspect module for classes with 'toolname' and '__call__'
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if isinstance(attr, type) and hasattr(attr, 'toolname') and hasattr(attr, '__call__'):
+                            toolname_attr = getattr(attr, 'toolname')
+                            # If it's a property/classproperty without being evaluated
+                            if hasattr(toolname_attr, '__get__'):
+                                try:
+                                    toolname_val = toolname_attr.__get__(None, attr)
+                                except Exception:
+                                    continue
+                            else:
+                                toolname_val = toolname_attr
+                                
+                            if isinstance(toolname_val, str) and toolname_val:
+                                available_tools[toolname_val] = attr
+                                logger.info(f"Loaded custom tool '{toolname_val}' from {py_file}")
+                except Exception as e:
+                    logger.error(f"Failed to load custom tools from {py_file}: {e}")
+
+        # 3. Instantiate configured tools
+        configured_tools = self.conf.get("tools")
+        if not configured_tools:
+            # Fallback to all built-in tools for backward compatibility
+            logger.warning("No 'tools' section in agent_conf.yaml. Loading all default tools.")
+            configured_tools = list(available_tools.keys())
+
+        tools = []
+        for tool_entry in configured_tools:
+            tool_name = None
+            tool_kwargs = {}
+            if isinstance(tool_entry, str):
+                tool_name = tool_entry
+            elif isinstance(tool_entry, dict):
+                # e.g. {'document-store': {'store_id': '...'}}
+                tool_name = list(tool_entry.keys())[0]
+                tool_kwargs = tool_entry[tool_name]
+                if tool_kwargs is None:
+                    tool_kwargs = {}
+            else:
+                logger.warning(f"Invalid tool configuration entry: {tool_entry}")
+                continue
+
+            if tool_name not in available_tools:
+                logger.warning(f"Tool '{tool_name}' requested in config but not found.")
+                continue
+
+            tool_cls = available_tools[tool_name]
+
+            # Inject required kwargs for specific built-in tools
+            if tool_cls == SubTaskTool:
+                if 'modules_dir' not in tool_kwargs:
+                    tool_kwargs['modules_dir'] = self.datadir / "subtask_modules"
+                if 'zmq_input_address' not in tool_kwargs:
+                    tool_kwargs['zmq_input_address'] = self.conf.get('input_address', 'tcp://127.0.0.1:5555')
+            elif tool_cls == ConversationSearchTool:
+                if 'message_history' not in tool_kwargs:
+                    tool_kwargs['message_history'] = self.message_history
+
+            try:
+                tool_instance = tool_cls(**tool_kwargs)
+                tools.append(create_tool_from_schema(tool_instance))
+                logger.debug(f"Initialized tool '{tool_name}'")
+            except Exception as e:
+                logger.error(f"Failed to initialize tool '{tool_name}': {e}", exc_info=True)
+
+        return tools
 
     def _initialize_agent(self, conf, tools):
         instructions = conf.get("instructions", "You are a friendly assistant")
