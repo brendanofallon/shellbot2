@@ -267,10 +267,11 @@ instructions: >
 
 #### Tools
 
-- **`tools`** (optional): List of tools available to the agent
+- **`tools`** (optional): List of tools available to the agent. If omitted, all built-in tools are loaded by default.
   - Each tool name corresponds to a tool implementation
   - Some tools (like `document-store`) support additional configuration
-  - Available tools:
+  - **Dynamic Plugin Support**: You can easily add custom tools by creating a `tools/` directory inside your `~/.shellbot2` datadir (e.g. `~/.shellbot2/tools/`). Any `.py` file placed there containing a class with a `toolname` property and a `__call__` method will be automatically discovered and can be enabled by adding its `toolname` to the `tools:` list!
+  - Available built-in tools:
     - `shell`: Execute shell commands
     - `python`: Execute Python code
     - `tavilysearch`: Web search (requires Tavily API key)
@@ -281,12 +282,17 @@ instructions: >
     - `image-generator`: Generate images
     - `memory`: Store and retrieve persistent information
     - `document-store`: Semantic search over documents (requires `store_id`)
+    - `conversation-search`: Search past conversation history
+    - `subtasks`: Run async python modules in the background
+    - `file_search`: Search files using regex
+    - `text_replace`: Replace exact text occurrences in a single file
 
 Example with tool configuration:
 ```yaml
 tools:
     - shell
     - python
+    - my-custom-tool   # Discovered from ~/.shellbot2/tools/my_custom_tool.py
     - document-store:
         store_id: 903cb699-de81-4507-9e9a-17befc2c6ac8
 ```

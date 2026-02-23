@@ -179,12 +179,19 @@ async def daemon_ask(args: argparse.Namespace) -> None:
     
     logger.info(f"Sending prompt to daemon at {input_address}: {args.prompt[:100]}...")
     
+    thread_id = None
+    if args.new_thread:
+        thread_id = str(uuid.uuid4())
+        logger.info(f"Starting new daemon thread with ID: {thread_id}")
+
     # Create the input message
     message = {
         "prompt": args.prompt,
         "source": "cli",
         "datetime": datetime.now().isoformat(),
     }
+    if thread_id is not None:
+        message["thread_id"] = thread_id
     
     context = zmq.Context()
     
@@ -396,6 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_ask_parser = daemon_subparsers.add_parser(
         'ask',
         help='Send a prompt to the running daemon (address is read from agent_conf.yaml)'
+    )
+    daemon_ask_parser.add_argument(
+        '--new-thread',
+        action='store_true',
+        help='Begin a new thread'
     )
     daemon_ask_parser.add_argument(
         'prompt',
