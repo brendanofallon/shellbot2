@@ -324,19 +324,6 @@ class MessageHistory:
                 for msg in messages
             ]
 
-    @staticmethod
-    def _message_has_user_prompt(message_entry: dict) -> bool:
-        message = message_entry.get("message")
-        if not isinstance(message, dict):
-            return False
-        parts = message.get("parts", [])
-        if not isinstance(parts, list):
-            return False
-        return any(
-            isinstance(part, dict) and part.get("part_kind") == "user-prompt"
-            for part in parts
-        )
-    
     def get_thread_ids(self) -> list[str]:
         """
         Get a list of all unique thread IDs in the database.

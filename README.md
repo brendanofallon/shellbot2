@@ -210,6 +210,19 @@ output_address: tcp://127.0.0.1:8528
 # Number of recent messages to include in context
 recent_messages_limit: 10
 
+# Optional context compaction settings
+# Older/longer assistant messages are progressively truncated as burden grows
+context_compaction:
+    burden_threshold: 80000
+    base_weight: 1.0
+    weight_growth: 0.35
+    interior_min_length: 700
+    final_min_length: 3500
+    preserve_head_chars: 240
+    preserve_tail_chars: 240
+    truncation_marker: "\n\n... message truncated ...\n\n"
+    max_total_length: 60000
+
 # Tool Configuration
 # List of tools available to the agent
 tools:
@@ -264,6 +277,20 @@ instructions: >
 - **`recent_messages_limit`** (optional, default: 5): Number of recent messages to include in the context
   - Higher values provide more context but increase token usage
   - Example: `recent_messages_limit: 10`
+
+- **`context_compaction`** (optional): Truncates long assistant/tool messages in a copy of recent context before sending to the model
+  - Preserves message JSON structure and keeps user messages unmodified
+  - Processes interactions from newest to oldest with a burden model
+  - Final assistant result in an interaction is only truncated when very long
+  - Configurable fields:
+    - `burden_threshold` (default `80000`)
+    - `base_weight` (default `1.0`)
+    - `weight_growth` (default `0.35`)
+    - `interior_min_length` (default `700`)
+    - `final_min_length` (default `3500`)
+    - `preserve_head_chars` / `preserve_tail_chars` (default `240`)
+    - `truncation_marker` (default `"\n\n... message truncated ...\n\n"`)
+    - `max_total_length` (default `60000`)
 
 #### Tools
 
@@ -325,6 +352,16 @@ input_address: tcp://127.0.0.1:8527
 output_address: tcp://127.0.0.1:8528
 
 recent_messages_limit: 10
+context_compaction:
+    burden_threshold: 80000
+    base_weight: 1.0
+    weight_growth: 0.35
+    interior_min_length: 700
+    final_min_length: 3500
+    preserve_head_chars: 240
+    preserve_tail_chars: 240
+    truncation_marker: "\n\n... message truncated ...\n\n"
+    max_total_length: 60000
 
 tools:
     - shell

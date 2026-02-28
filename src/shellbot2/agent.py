@@ -22,6 +22,7 @@ from pydantic_ai import (
 from pydantic_ai.messages import ModelRequest
         
 from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
+from shellbot2.context_compaction import ContextCompactionConfig, compact_recent_interactions
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
 from shellbot2.tools.fastmailtool import FastmailTool
@@ -263,16 +264,23 @@ class ShellBot3:
                 tools=tools,
             )
 
+    def _get_context(self):
+        interactions = self.message_history.get_recent_interactions(
+            self.thread_id,
+            limit=self.conf.get('recent_messages_limit', 5),
+            messages_only=False,
+        )
+        compaction_config = ContextCompactionConfig.from_dict(
+            self.conf.get("context_compaction", {}) or {}
+        )
+        compacted_messages = compact_recent_interactions(interactions, compaction_config)
+        recent_messages = ModelMessagesTypeAdapter.validate_python(compacted_messages)
+        return recent_messages
+
     async def run(self, prompt: str):
         logger.info(f"Running prompt: {prompt[0:100]}...")
-        recent_messages = ModelMessagesTypeAdapter.validate_python([
-            msg.message
-            for msg in self.message_history.get_recent_interactions(
-                self.thread_id,
-                limit=self.conf.get('recent_messages_limit', 5),
-                messages_only=True,
-            )
-        ])
+        recent_messages = self._get_context()
+        
         user_message = UserMessage(id=str(uuid.uuid4()), content=prompt)
         run_input = RunAgentInput(
             thread_id=self.thread_id,
