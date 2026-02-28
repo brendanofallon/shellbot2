@@ -22,7 +22,7 @@ class ContextCompactionConfig:
     preserve_head_chars: int = 240
     preserve_tail_chars: int = 240
     truncation_marker: str = "\n\n... message truncated ...\n\n"
-    max_total_length: int = 60000
+    max_total_length: int = 500000
 
     @classmethod
     def from_dict(cls, conf: dict[str, Any]) -> "ContextCompactionConfig":

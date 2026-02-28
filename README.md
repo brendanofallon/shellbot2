@@ -361,7 +361,7 @@ context_compaction:
     preserve_head_chars: 240
     preserve_tail_chars: 240
     truncation_marker: "\n\n... message truncated ...\n\n"
-    max_total_length: 60000
+    max_total_length: 500000
 
 tools:
     - shell
