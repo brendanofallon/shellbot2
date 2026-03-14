@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.providers.bedrock import BedrockProvider
-from ag_ui.core import RunAgentInput, UserMessage
+from ag_ui.core import CustomEvent, RunAgentInput, UserMessage
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai import (
     Agent, 
@@ -33,6 +33,7 @@ from shellbot2.tools.docstoretool import DocStoreTool
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
 from shellbot2.tools.subtasktool import SubTaskTool
 from shellbot2.tools.filesearchtool import FileSearchFunction, TextReplaceFunction
+from shellbot2.tools.notestool import NotesTool
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,7 @@ class ShellBot3:
             ConversationSearchTool.toolname: ConversationSearchTool,
             FileSearchFunction.toolname: FileSearchFunction,
             TextReplaceFunction.toolname: TextReplaceFunction,
+            NotesTool.toolname: NotesTool,
         }
 
         # 2. Discover custom tools in self.datadir / "tools"
@@ -280,7 +282,14 @@ class ShellBot3:
     async def run(self, prompt: str):
         logger.info(f"Running prompt: {prompt[0:100]}...")
         recent_messages = self._get_context()
-        
+
+        if self.event_dispatcher and recent_messages:
+            context_json = ModelMessagesTypeAdapter.dump_json(recent_messages)
+            self.event_dispatcher.dispatch(CustomEvent(
+                name="context_token_estimate",
+                value=len(context_json) // 4,
+            ))
+
         user_message = UserMessage(id=str(uuid.uuid4()), content=prompt)
         run_input = RunAgentInput(
             thread_id=self.thread_id,
