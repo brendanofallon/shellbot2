@@ -71,11 +71,14 @@ async def run_prompt(args: argparse.Namespace) -> None:
         thread_id = str(uuid.uuid4())
         logger.info(f"Starting new thread with ID: {thread_id}")
     
+    cwd = os.getcwd()
+    prompt = f"My current working directory is: {cwd}\n\n{args.prompt}"
+
     event_dispatcher = create_rich_output_dispatcher()
     agent = ShellBot3(args.datadir, thread_id=thread_id, event_dispatcher=event_dispatcher)
     
     try:
-        await agent.run(args.prompt)
+        await agent.run(prompt)
         logger.info("Prompt completed successfully")
     except Exception as e:
         logger.error(f"Error running prompt: {e}", exc_info=True)
@@ -184,9 +187,11 @@ async def daemon_ask(args: argparse.Namespace) -> None:
         thread_id = str(uuid.uuid4())
         logger.info(f"Starting new daemon thread with ID: {thread_id}")
 
-    # Create the input message
+    cwd = os.getcwd()
+    prompt = f"My current working directory is: {cwd}\n\n{args.prompt}"
+
     message = {
-        "prompt": args.prompt,
+        "prompt": prompt,
         "source": "cli",
         "datetime": datetime.now().isoformat(),
     }

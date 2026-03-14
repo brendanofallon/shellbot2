@@ -137,6 +137,8 @@ class RichOutputHandler(EventHandler):
         self._live: Live | None = None
         self._thinking_spinner: Status | None = None
         self._status_message: str = ""
+        self._context_tokens: int = 0
+        self._current_response_chars: int = 0
     
     def set_status(self, message: str) -> None:
         """Set the status message shown in the ephemeral panel during streaming.
@@ -149,6 +151,23 @@ class RichOutputHandler(EventHandler):
             message: Status text to display (e.g. token counts, progress).
         """
         self._status_message = message
+        if self._live:
+            self._live.update(self._build_live_renderable())
+
+    @staticmethod
+    def _format_token_count(count: int) -> str:
+        if count >= 1000:
+            return f"{count / 1000:.1f}k"
+        return str(count)
+
+    def _update_token_status(self) -> None:
+        """Rebuild the status bar text from current token estimates."""
+        parts = []
+        if self._context_tokens > 0:
+            parts.append(f"Context: ~{self._format_token_count(self._context_tokens)} tokens")
+        response_tokens = self._current_response_chars // 4
+        parts.append(f"Response: ~{self._format_token_count(response_tokens)} tokens")
+        self._status_message = "  |  ".join(parts)
         if self._live:
             self._live.update(self._build_live_renderable())
 
@@ -207,10 +226,11 @@ class RichOutputHandler(EventHandler):
         if event_type is None:
             return
 
-        self._show_spinner()
-
         if hasattr(event_type, 'value'):
             event_type = event_type.value
+
+        if event_type != "CUSTOM":
+            self._show_spinner()
 
         handler_method = getattr(self, f'_handle_{event_type.lower()}', None)
         if handler_method:
@@ -218,11 +238,32 @@ class RichOutputHandler(EventHandler):
         elif event_type in ("RUN_FINISHED", "RUN_ERROR"):
             self._hide_spinner()
 
+    def _handle_run_started(self, event: BaseEvent) -> None:
+        """Reset per-run response token tracking."""
+        self._current_response_chars = 0
+
+    def _handle_run_finished(self, event: BaseEvent) -> None:
+        self._hide_spinner()
+
+    def _handle_run_error(self, event: BaseEvent) -> None:
+        self._hide_spinner()
+
+    def _handle_custom(self, event: BaseEvent) -> None:
+        name = getattr(event, 'name', None)
+        if name == "context_token_estimate":
+            self._context_tokens = getattr(event, 'value', 0)
+            if self._context_tokens > 0:
+                self.console.print(Padding(
+                    Text(f"Context: ~{self._format_token_count(self._context_tokens)} tokens", style="dim italic"),
+                    (0, 0, 0, self.MARKDOWN_LEFT_PADDING),
+                ))
+
     def _handle_text_message_start(self, event: BaseEvent) -> None:
         """Handle start of text message - initialize transient Live display."""
         self._hide_spinner()
         self._current_message_id = getattr(event, 'message_id', None)
         self._message_content = ""
+        self._update_token_status()
         self._live = Live(
             self._build_live_renderable(),
             console=self.console,
@@ -237,8 +278,9 @@ class RichOutputHandler(EventHandler):
         delta = getattr(event, 'delta', None)
         if delta:
             self._message_content += delta
+            self._current_response_chars += len(delta)
             if self._live:
-                self._live.update(self._build_live_renderable())
+                self._update_token_status()
     
     def _handle_text_message_end(self, event: BaseEvent) -> None:
         """Handle end of text message - stop Live and permanently print the result."""
@@ -270,6 +312,7 @@ class RichOutputHandler(EventHandler):
         
         if tool_call_id and tool_call_id in self._tool_calls and delta:
             self._tool_calls[tool_call_id]['args'] += delta
+            self._current_response_chars += len(delta)
     
     def _handle_tool_call_end(self, event: BaseEvent) -> None:
         """Handle end of tool call - display tool name and arguments immediately."""
