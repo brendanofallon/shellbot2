@@ -119,6 +119,31 @@ python -m shellbot2.cli daemon watch
 - Debugging daemon behavior
 - Keeping track of scheduled or automated tasks
 
+### Token Usage Statistics
+
+ShellBot2 automatically tracks token usage for every agent run. You can view usage statistics with the `stats` command:
+
+```bash
+# Show all-time token usage
+python -m shellbot2.cli stats
+
+# Show usage for today only
+python -m shellbot2.cli stats --period today
+
+# Show usage for the last 7 days
+python -m shellbot2.cli stats --period week
+
+# Show usage for the last 30 days
+python -m shellbot2.cli stats --period month
+```
+
+The report includes:
+- **Total runs** and aggregate token counts (request, response, total)
+- **Per-model breakdown** showing which models consumed the most tokens
+- **Top threads** by token usage
+
+Usage data is stored in a SQLite database (`usage.db`) in the data directory and persists across sessions.
+
 ### Sending Messages to the Daemon
 
 #### Using the CLI
