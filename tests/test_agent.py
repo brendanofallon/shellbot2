@@ -1,7 +1,9 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from shellbot2.agent import ShellBot3
+from shellbot2.agent import ShellBot3, create_azure_provider, _is_azure_foundry_v1_endpoint
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.azure import AzureProvider
 
 @patch('shellbot2.agent.load_conf')
 @patch('shellbot2.agent.MessageHistory')
@@ -90,3 +92,26 @@ class MyCustomTool:
     tool_names = [tool.name for tool in tools_passed]
     assert 'shell' in tool_names
     assert 'my-custom-tool' in tool_names
+
+def test_azure_foundry_v1_endpoint_detection():
+    assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1/")
+    assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1")
+    assert not _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/")
+
+@patch.dict('os.environ', {
+    'AZURE_FOUNDRY_ENDPOINT': 'https://example.openai.azure.com/openai/v1/',
+    'AZURE_FOUNDRY_API_KEY': 'test-key',
+}, clear=False)
+def test_create_azure_provider_uses_openai_for_foundry_v1():
+    provider = create_azure_provider({})
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.base_url.rstrip('/') == 'https://example.openai.azure.com/openai/v1'
+
+@patch.dict('os.environ', {
+    'AZURE_OPENAI_ENDPOINT': 'https://example.openai.azure.com/',
+    'AZURE_OPENAI_API_KEY': 'test-key',
+    'OPENAI_API_VERSION': '2025-01-01-preview',
+}, clear=False)
+def test_create_azure_provider_uses_azure_for_classic_endpoint():
+    provider = create_azure_provider({})
+    assert isinstance(provider, AzureProvider)
