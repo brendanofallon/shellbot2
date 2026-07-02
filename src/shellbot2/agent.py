@@ -33,6 +33,7 @@ from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispa
 from shellbot2.tools.fastmailtool import FastmailTool
 from shellbot2.tools.cal import CalendarTool
 from shellbot2.tools.imagetool import ImageTool
+from shellbot2.tools.imagereader import ImageReader
 from shellbot2.tools.memorytool import MemoryFunction
 from shellbot2.tools.docstoretool import DocStoreTool 
 from shellbot2.tools.conversationsearchtool import ConversationSearchTool
@@ -188,6 +189,7 @@ class ShellBot3:
             FastmailTool.toolname: FastmailTool,
             CalendarTool.toolname: CalendarTool,
             ImageTool.toolname: ImageTool,
+            ImageReader.toolname: ImageReader,
             MemoryFunction.toolname: MemoryFunction,
             DocStoreTool.toolname: DocStoreTool,
             ClipboardFunction.toolname: ClipboardFunction,
