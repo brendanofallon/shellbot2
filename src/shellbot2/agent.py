@@ -6,6 +6,7 @@ import yaml
 import uuid
 import logging
 import boto3
+import os
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -20,7 +21,11 @@ from pydantic_ai import (
     ModelMessagesTypeAdapter
 )
 from pydantic_ai.messages import ModelRequest
-        
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.azure import AzureProvider
+from pydantic_ai.providers.openai import OpenAIProvider
+
 from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.context_compaction import ContextCompactionConfig, compact_recent_interactions
 from shellbot2.message_history import MessageHistory
@@ -121,6 +126,30 @@ def verify_aws_credentials(boto_session: boto3.Session, profile_name: str):
     sts = boto_session.client("sts")
     sts.get_caller_identity()
     return frozen_credentials
+
+
+def _is_azure_foundry_v1_endpoint(endpoint: str | None) -> bool:
+    return bool(endpoint and "/openai/v1" in endpoint.rstrip("/"))
+
+
+def create_azure_provider(conf: dict):
+    """Create a provider for Azure-hosted OpenAI models.
+
+    Azure AI Foundry exposes an OpenAI-compatible v1 API at /openai/v1/, which must
+    use OpenAIProvider. Classic Azure OpenAI deployments use AzureProvider instead.
+    """
+    azure_endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_FOUNDRY_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+
+    if _is_azure_foundry_v1_endpoint(azure_endpoint):
+        return OpenAIProvider(base_url=azure_endpoint.rstrip("/"), api_key=api_key)
+
+    azure_conf = conf.get("azure", {})
+    return AzureProvider(
+        azure_endpoint=azure_endpoint,
+        api_key=api_key,
+        api_version=azure_conf.get("api_version") or os.getenv("OPENAI_API_VERSION"),
+    )
 
 
 def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
@@ -262,6 +291,17 @@ class ShellBot3:
             model = initialize_bedrock_model(conf.get("model"), aws_profile=bedrock_conf.get("profile", "BedrockAPI-Access-470052372761"), aws_region=bedrock_conf.get('region', 'us-west-2') )
             
             return Agent(model=model, instructions=instructions, tools=tools)
+        elif conf.get("provider") == "azure":
+            provider = create_azure_provider(conf)
+            if "gpt" in conf.get("model"):
+                logger.info(f"Creating model {conf.get('provider')}: {conf.get('model')}")
+                return Agent(
+                    model = OpenAIChatModel(conf.get("model"), provider=provider, settings={"reasoning_effort": "medium"}),
+                    instructions=instructions,
+                    tools=tools,
+                )
+            else:
+                raise ValueError("Only GPT models supported in Azure now")
         else:
             return Agent(
                 conf.get("model", "google-gla:gemini-3-flash-preview"),
