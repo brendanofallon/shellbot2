@@ -11,6 +11,7 @@ from tavily import TavilyClient
 
 logger = logging.getLogger(__name__)    
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 
@@ -275,6 +276,114 @@ class TavilySearchFunction:
         txt = self._result_to_text(response)
         return txt
     
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="shell",
+        description=(
+            "This function executes the input as a single command in a standard "
+            "Zsh linux terminal, and returns the exit code, stdout, and stderr as "
+            "a string. The input must be a valid Zsh shell command using commonly "
+            "available linux command line tools."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The command to execute",
+                },
+            },
+            "required": ["command"],
+        },
+        factory=lambda _runtime, kwargs: ShellFunction(**kwargs),
+    ),
+    ToolSpec(
+        name="reader",
+        description=(
+            "This function extracts text from a local file in pdf or .txt format, "
+            "or a web url, and returns the text. The input must be a relative or "
+            "absolute path to a local file, or a web url beginning with http, and "
+            "the output will be the full text extracted from the file or page."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The URL or local file path to extract text from",
+                },
+            },
+            "required": ["path"],
+        },
+        factory=lambda _runtime, kwargs: ReaderFunction(**kwargs),
+    ),
+    ToolSpec(
+        name="clipboard",
+        description=(
+            "This function provide copy and paste operations using the system "
+            "clipboard. the 'copy' operation puts text data into the clipboard, "
+            "and the 'paste' operation reads data from the clipboard."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The copy or paste operation",
+                    "enum": ["copy", "paste"],
+                },
+                "data": {
+                    "type": "string",
+                    "description": "The text to copy to the clipboard",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=lambda _runtime, kwargs: ClipboardFunction(**kwargs),
+    ),
+    ToolSpec(
+        name="python",
+        description=(
+            "This function runs python code. It expects a code parameter that is a "
+            "fully self-contained python script that will be executed on the "
+            "user's computer. The process exit code, standard output and standard "
+            "error streams of the program are returned."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "A complete python script to run.",
+                },
+            },
+            "required": ["code"],
+        },
+        factory=lambda _runtime, kwargs: PythonFunction(**kwargs),
+    ),
+    ToolSpec(
+        name="tavilysearch",
+        description=(
+            "This function searches the web using Tavily and returns the URLs and "
+            "short text snippets from the top hits. The query input should be a "
+            "standard web search query, for instance 'Abraham Lincoln pet mouse' "
+            "or 'What is the capital of France?'"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Web search query",
+                },
+            },
+            "required": ["query"],
+        },
+        factory=lambda _runtime, kwargs: TavilySearchFunction(**kwargs),
+    ),
+)
+
 
 if __name__=="__main__":    
     f = ReaderFunction()

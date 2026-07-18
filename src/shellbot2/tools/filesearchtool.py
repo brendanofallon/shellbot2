@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ class FileSearchFunction:
 
     @classproperty
     def toolname(cls):
-        return "file_search"
+        return "file-search"
 
     @property
     def description(self):
@@ -190,3 +191,61 @@ class TextReplaceFunction:
 
         logger.info(f"Replaced {count} occurrence(s) in {file_path}")
         return f"Successfully replaced {count} occurrence(s) in {file_path}."
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="file-search",
+        function_name="file_search",
+        description=(
+            "Search files or file glob patterns for a regular expression and "
+            "return matching lines with surrounding context."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Regular expression to search for.",
+                },
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths, directories, or glob patterns to search.",
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Context lines before and after each match.",
+                },
+            },
+            "required": ["pattern", "paths"],
+        },
+        factory=lambda _runtime, kwargs: FileSearchFunction(**kwargs),
+    ),
+    ToolSpec(
+        name="text_replace",
+        description=(
+            "Replace exact text occurrences in a single file and return a summary "
+            "of the replacements."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to modify.",
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "Exact text to replace.",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Replacement text.",
+                },
+            },
+            "required": ["file_path", "old_text", "new_text"],
+        },
+        factory=lambda _runtime, kwargs: TextReplaceFunction(**kwargs),
+    ),
+)

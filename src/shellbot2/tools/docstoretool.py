@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import json
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 
@@ -107,6 +108,50 @@ class DocStoreTool:
         elif op == "list":
             results = self.mixedbread.stores.files.list(store_identifier=self.store_id, limit=100)
             return json.dumps(results.to_json(), indent=2)
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="document-store",
+        description=(
+            "Manage a document store. Supports semantic search, file upload, "
+            "download, and listing stored files."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["search", "download", "upload", "list"],
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query; required for search.",
+                },
+                "file_id": {
+                    "type": "string",
+                    "description": "File ID; required for download.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Destination filename; required for download.",
+                },
+                "destination_dir": {
+                    "type": "string",
+                    "description": "Optional destination directory for downloads.",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Local file path; required for upload.",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=lambda _runtime, kwargs: DocStoreTool(**kwargs),
+    ),
+)
+
 
 if __name__ == "__main__":
     docstoretool = DocStoreTool()

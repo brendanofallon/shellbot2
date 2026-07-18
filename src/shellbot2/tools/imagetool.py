@@ -5,6 +5,7 @@ import base64
 from typing import Optional
 
 from google import genai
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 
@@ -101,6 +102,36 @@ class ImageTool:
         
         return f"Image generated and saved to: {dest_path}"
             
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="image-generator",
+        description=(
+            "Generate an image from a text prompt using Google's Gemini image "
+            "generation API. Optionally save it to a chosen path and open it."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Text description of the image to generate.",
+                },
+                "dest_path": {
+                    "type": "string",
+                    "description": "Optional destination path for the image.",
+                },
+                "open": {
+                    "type": "boolean",
+                    "description": "Open the generated image after saving it.",
+                },
+            },
+            "required": ["prompt"],
+        },
+        factory=lambda _runtime, kwargs: ImageTool(**kwargs),
+    ),
+)
 
 
 if __name__ == "__main__":

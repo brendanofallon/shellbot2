@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 class MemoryTool:
@@ -369,6 +370,38 @@ class MemoryFunction:
         
         except Exception as e:
             return f"Error performing {operation} operation: {str(e)}"
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="memory",
+        description=(
+            "Manage a persistent key-value memory store for user preferences, "
+            "projects, and related information. Supports list, insert, replace, "
+            "get, delete, and exists operations."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform",
+                    "enum": ["list", "insert", "replace", "get", "delete", "exists"],
+                },
+                "key": {
+                    "type": "string",
+                    "description": "The key for the operation; not required for list.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The value to store; required for insert and replace.",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=lambda _runtime, kwargs: MemoryFunction(**kwargs),
+    ),
+)
 
 
 if __name__ == "__main__":

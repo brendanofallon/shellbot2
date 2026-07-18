@@ -21,20 +21,11 @@ from pydantic_ai import (
 )
 from pydantic_ai.messages import ModelRequest
         
-from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.context_compaction import ContextCompactionConfig, compact_recent_interactions
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
-from shellbot2.tools.fastmailtool import FastmailTool
-from shellbot2.tools.cal import CalendarTool
-from shellbot2.tools.imagetool import ImageTool
-from shellbot2.tools.imagereader import ImageReader
-from shellbot2.tools.memorytool import MemoryFunction
-from shellbot2.tools.docstoretool import DocStoreTool 
-from shellbot2.tools.conversationsearchtool import ConversationSearchTool
-from shellbot2.tools.subtasktool import SubTaskTool
-from shellbot2.tools.filesearchtool import FileSearchFunction, TextReplaceFunction
-from shellbot2.tools.notestool import NotesTool
+from shellbot2.tools.discovery import discover_tool_specs
+from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +76,12 @@ def safe_tool_call(func, tool_name: str):
     return wrapper
 
 
-def create_tool_from_schema(tool_cls):
+def create_tool_from_spec(tool_spec: ToolSpec, tool_instance):
     return Tool.from_schema(
-        function=safe_tool_call(tool_cls.__call__, tool_cls.name),
-        name=tool_cls.name,
-        description=tool_cls.description,
-        json_schema=tool_cls.parameters,
+        function=safe_tool_call(tool_instance.__call__, tool_spec.model_name),
+        name=tool_spec.model_name,
+        description=tool_spec.description,
+        json_schema=tool_spec.parameters,
         takes_ctx=False,
     )
 
@@ -150,104 +141,50 @@ class ShellBot3:
         self.event_dispatcher = event_dispatcher
     
     def _create_tools(self):
-        import importlib.util
-        import sys
-        
-        # 1. Gather all built-in tools
-        available_tools = {
-            ShellFunction.toolname: ShellFunction,
-            ReaderFunction.toolname: ReaderFunction,
-            FastmailTool.toolname: FastmailTool,
-            CalendarTool.toolname: CalendarTool,
-            ImageTool.toolname: ImageTool,
-            ImageReader.toolname: ImageReader,
-            MemoryFunction.toolname: MemoryFunction,
-            DocStoreTool.toolname: DocStoreTool,
-            ClipboardFunction.toolname: ClipboardFunction,
-            PythonFunction.toolname: PythonFunction,
-            TavilySearchFunction.toolname: TavilySearchFunction,
-            SubTaskTool.toolname: SubTaskTool,
-            ConversationSearchTool.toolname: ConversationSearchTool,
-            FileSearchFunction.toolname: FileSearchFunction,
-            TextReplaceFunction.toolname: TextReplaceFunction,
-            NotesTool.toolname: NotesTool,
-        }
-
-        # 2. Discover custom tools in self.datadir / "tools"
-        custom_tools_dir = self.datadir / "tools"
-        if custom_tools_dir.exists() and custom_tools_dir.is_dir():
-            for py_file in custom_tools_dir.glob("*.py"):
-                if py_file.name.startswith("__"):
-                    continue
-                try:
-                    module_name = py_file.stem
-                    spec = importlib.util.spec_from_file_location(module_name, py_file)
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = module
-                    spec.loader.exec_module(module)
-                    
-                    # Inspect module for classes with 'toolname' and '__call__'
-                    for attr_name in dir(module):
-                        attr = getattr(module, attr_name)
-                        if isinstance(attr, type) and hasattr(attr, 'toolname') and hasattr(attr, '__call__'):
-                            toolname_attr = getattr(attr, 'toolname')
-                            # If it's a property/classproperty without being evaluated
-                            if hasattr(toolname_attr, '__get__'):
-                                try:
-                                    toolname_val = toolname_attr.__get__(None, attr)
-                                except Exception:
-                                    continue
-                            else:
-                                toolname_val = toolname_attr
-                                
-                            if isinstance(toolname_val, str) and toolname_val:
-                                available_tools[toolname_val] = attr
-                                logger.info(f"Loaded custom tool '{toolname_val}' from {py_file}")
-                except Exception as e:
-                    logger.error(f"Failed to load custom tools from {py_file}: {e}")
-
-        # 3. Instantiate configured tools
+        available_specs = discover_tool_specs(self.datadir / "tools")
         configured_tools = self.conf.get("tools")
         if not configured_tools:
-            # Fallback to all built-in tools for backward compatibility
-            logger.warning("No 'tools' section in agent_conf.yaml. Loading all default tools.")
-            configured_tools = list(available_tools.keys())
+            logger.warning("No 'tools' section in agent_conf.yaml. Loading all discovered tools.")
+            configured_tools = list(available_specs)
 
+        runtime = ToolRuntime(
+            datadir=self.datadir,
+            config=self.conf,
+            message_history=self.message_history,
+        )
         tools = []
         for tool_entry in configured_tools:
-            tool_name = None
-            tool_kwargs = {}
             if isinstance(tool_entry, str):
                 tool_name = tool_entry
-            elif isinstance(tool_entry, dict):
-                # e.g. {'document-store': {'store_id': '...'}}
-                tool_name = list(tool_entry.keys())[0]
-                tool_kwargs = tool_entry[tool_name]
+                tool_kwargs: dict = {}
+            elif isinstance(tool_entry, dict) and len(tool_entry) == 1:
+                tool_name, tool_kwargs = next(iter(tool_entry.items()))
                 if tool_kwargs is None:
                     tool_kwargs = {}
+                elif not isinstance(tool_kwargs, dict):
+                    logger.warning(
+                        "Tool %r configuration must be a mapping, got %s.",
+                        tool_name,
+                        type(tool_kwargs).__name__,
+                    )
+                    continue
             else:
                 logger.warning(f"Invalid tool configuration entry: {tool_entry}")
                 continue
 
-            if tool_name not in available_tools:
+            tool_spec = available_specs.get(tool_name)
+            if tool_spec is None:
                 logger.warning(f"Tool '{tool_name}' requested in config but not found.")
                 continue
 
-            tool_cls = available_tools[tool_name]
-
-            # Inject required kwargs for specific built-in tools
-            if tool_cls == SubTaskTool:
-                if 'modules_dir' not in tool_kwargs:
-                    tool_kwargs['modules_dir'] = self.datadir / "subtask_modules"
-                if 'zmq_input_address' not in tool_kwargs:
-                    tool_kwargs['zmq_input_address'] = self.conf.get('input_address', 'tcp://127.0.0.1:5555')
-            elif tool_cls == ConversationSearchTool:
-                if 'message_history' not in tool_kwargs:
-                    tool_kwargs['message_history'] = self.message_history
-
             try:
-                tool_instance = tool_cls(**tool_kwargs)
-                tools.append(create_tool_from_schema(tool_instance))
+                tool_instance = tool_spec.factory(runtime, tool_kwargs)
+                if not callable(tool_instance):
+                    raise TypeError(
+                        f"Tool factory for '{tool_name}' returned a non-callable "
+                        f"{type(tool_instance).__name__}"
+                    )
+                tools.append(create_tool_from_spec(tool_spec, tool_instance))
                 logger.debug(f"Initialized tool '{tool_name}'")
             except Exception as e:
                 logger.error(f"Failed to initialize tool '{tool_name}': {e}", exc_info=True)

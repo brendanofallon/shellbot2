@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic_ai.messages import BinaryContent, ToolReturn
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,28 @@ class ImageReader:
             f"The image is attached as base64-encoded binary content."
         )
         return ToolReturn(return_value=summary, content=[summary, binary_content])
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="image-reader",
+        description=(
+            "Read a local image file and return binary content suitable for a "
+            "vision-capable model."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative or absolute path to an image file.",
+                },
+            },
+            "required": ["path"],
+        },
+        factory=lambda _runtime, kwargs: ImageReader(**kwargs),
+    ),
+)
 
 
 if __name__ == "__main__":

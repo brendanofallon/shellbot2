@@ -9,6 +9,7 @@ from gcsa.google_calendar import GoogleCalendar
 from gcsa.event import Event
 from google.oauth2.service_account import Credentials
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 logger = logging.getLogger(__name__)
@@ -442,6 +443,66 @@ class CalendarTool:
         
         else:
             return f"Error: Unknown operation '{operation}'"
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="calendar",
+        description=(
+            "Access Google Calendar events. Retrieve events in a time range or "
+            "create an event in the personal calendar."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["get_events", "create_event"],
+                },
+                "calendar": {
+                    "type": "string",
+                    "description": "Calendar to operate on.",
+                    "enum": ["personal", "ofindfors"],
+                },
+                "time_min": {
+                    "type": "string",
+                    "description": "Optional ISO 8601 query start time.",
+                },
+                "time_max": {
+                    "type": "string",
+                    "description": "Optional ISO 8601 query end time.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Optional maximum number of events.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Event title; required for create_event.",
+                },
+                "start": {
+                    "type": "string",
+                    "description": "ISO 8601 event start; required for create_event.",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "ISO 8601 event end; required for create_event.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional event description.",
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Optional event location.",
+                },
+            },
+            "required": ["operation", "calendar"],
+        },
+        factory=lambda _runtime, kwargs: CalendarTool(**kwargs),
+    ),
+)
 
 
 if __name__ == "__main__":

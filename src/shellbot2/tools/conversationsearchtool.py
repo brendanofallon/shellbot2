@@ -1,6 +1,7 @@
 from typing import Optional
 from pathlib import Path
 
+from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
 from shellbot2.tools.util import classproperty
 from shellbot2.message_history import MessageHistory
 
@@ -61,7 +62,7 @@ class ConversationSearchTool:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query to find relevant conversations. Should be a few short keywords suitable as input for BM25 search.g"
+                    "description": "The search query to find relevant conversations. Should be a few short keywords suitable as input for BM25 search."
                 }
             },
             "required": ["query"]
@@ -79,6 +80,35 @@ class ConversationSearchTool:
             return "No matching conversations found for the given query."
         
         return results
+
+
+def _create_conversation_search_tool(runtime: ToolRuntime, kwargs: dict) -> ConversationSearchTool:
+    init_kwargs = dict(kwargs)
+    if "message_history" not in init_kwargs:
+        init_kwargs["message_history"] = runtime.message_history
+    return ConversationSearchTool(**init_kwargs)
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="conversation-search",
+        description=(
+            "Search stored conversation history with BM25 and return relevant "
+            "user-assistant conversation fragments."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Short search query for relevant conversations.",
+                },
+            },
+            "required": ["query"],
+        },
+        factory=_create_conversation_search_tool,
+    ),
+)
 
 
 if __name__ == "__main__":

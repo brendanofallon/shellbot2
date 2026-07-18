@@ -4,17 +4,11 @@ Tools package for shellbot.
 This package contains all tool modules that can be used by assistants.
 """
 
-from . import botfunctions, memorytool, docstoretool
-from . import fastmailtool, cal, imagetool, conversationsearchtool
-from . import filesearchtool
+from .discovery import discover_tool_specs
+from .tool_spec import ToolRuntime, ToolSpec
 
 __all__ = [
-    'botfunctions',
-    'memorytool',
-    'docstoretool',
-    'fastmailtool',
-    'cal',
-    'imagetool',
-    'conversationsearchtool',
-    'filesearchtool',
+    "ToolRuntime",
+    "ToolSpec",
+    "discover_tool_specs",
 ]

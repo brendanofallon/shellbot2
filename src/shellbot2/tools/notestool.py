@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 
@@ -119,3 +120,30 @@ class NotesTool:
             return self._list()
         else:
             return f"Unknown operation: {operation}"
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="notes",
+        description=(
+            "Search or list personal text notes stored in a configured notes "
+            "directory."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["search", "list"],
+                },
+                "keywords": {
+                    "type": "string",
+                    "description": "Space-separated keywords; required for search.",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=lambda _runtime, kwargs: NotesTool(**kwargs),
+    ),
+)

@@ -1,4 +1,5 @@
 from shellbot2.subtask.subtaskrunner import SubTaskManager
+from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
 from shellbot2.tools.util import classproperty
 import json
 from pathlib import Path
@@ -80,3 +81,48 @@ class SubTaskTool:
             stderr = self.manager.get(name).get_stderr()
             error = self.manager.get(name).get_error()
             return f"Stdout: {stdout}\nStderr: {stderr}\nError: {error}"
+
+
+def _create_subtask_tool(runtime: ToolRuntime, kwargs: dict) -> SubTaskTool:
+    init_kwargs = dict(kwargs)
+    legacy_modules_dir = init_kwargs.pop("modules_dir", None)
+    init_kwargs.setdefault(
+        "subtask_modules_dir",
+        legacy_modules_dir or runtime.datadir / "subtask_modules",
+    )
+    init_kwargs.setdefault(
+        "zmq_input_address",
+        runtime.config.get("input_address", "tcp://127.0.0.1:5555"),
+    )
+    return SubTaskTool(**init_kwargs)
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="subtasks",
+        description=(
+            "Create and manage asynchronous Python subtasks. Supports create, "
+            "list, terminate, and get_output operations."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["create", "list", "terminate", "get_output"],
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Subtask name for create, terminate, and get_output.",
+                },
+                "code": {
+                    "type": "string",
+                    "description": "Python module code for create.",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=_create_subtask_tool,
+    ),
+)

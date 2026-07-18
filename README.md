@@ -294,10 +294,11 @@ instructions: >
 
 #### Tools
 
-- **`tools`** (optional): List of tools available to the agent. If omitted, all built-in tools are loaded by default.
+- **`tools`** (optional): List of tools available to the agent. If omitted, all discovered tools are loaded by default.
   - Each tool name corresponds to a tool implementation
   - Some tools (like `document-store`) support additional configuration
-  - **Dynamic Plugin Support**: You can easily add custom tools by creating a `tools/` directory inside your `~/.shellbot2` datadir (e.g. `~/.shellbot2/tools/`). Any `.py` file placed there containing a class with a `toolname` property and a `__call__` method will be automatically discovered and can be enabled by adding its `toolname` to the `tools:` list!
+  - **Dynamic Plugin Support**: Shellbot scans both its packaged `shellbot2.tools` directory and the `tools/` directory inside the selected datadir (for example, `~/.shellbot2/tools/`). A custom tool with the same name as a packaged one intentionally overrides it; duplicate names within either directory are rejected.
+  - Each loadable Python module exports `TOOL_SPECS`, an iterable of `ToolSpec` objects. A spec defines its required `name` (the YAML key), `description`, `parameters` (an object JSON Schema), and `factory` (which receives runtime dependencies plus configured keyword arguments and returns the callable implementation). `function_name` is optional and only needed when the model-facing function name differs from the YAML key.
   - Available built-in tools:
     - `shell`: Execute shell commands
     - `python`: Execute Python code
@@ -307,12 +308,14 @@ instructions: >
     - `fastmail`: Email integration (requires Fastmail credentials)
     - `calendar`: Calendar integration (requires Google Calendar credentials)
     - `image-generator`: Generate images
+    - `image-reader`: Read local images for vision-capable models
     - `memory`: Store and retrieve persistent information
     - `document-store`: Semantic search over documents (requires `store_id`)
     - `conversation-search`: Search past conversation history
     - `subtasks`: Run async python modules in the background
-    - `file_search`: Search files using regex
+    - `file-search`: Search files using regex
     - `text_replace`: Replace exact text occurrences in a single file
+    - `notes`: Search and list personal notes
 
 Example with tool configuration:
 ```yaml
@@ -322,6 +325,29 @@ tools:
     - my-custom-tool   # Discovered from ~/.shellbot2/tools/my_custom_tool.py
     - document-store:
         store_id: 903cb699-de81-4507-9e9a-17befc2c6ac8
+```
+
+Minimal custom plugin (`~/.shellbot2/tools/my_custom_tool.py`):
+```python
+from shellbot2.tools.tool_spec import ToolSpec
+
+
+class MyCustomTool:
+    def __init__(self, prefix="custom result"):
+        self.prefix = prefix
+
+    def __call__(self, **kwargs):
+        return self.prefix
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="my-custom-tool",
+        description="Returns a configurable custom result.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        factory=lambda _runtime, kwargs: MyCustomTool(**kwargs),
+    ),
+)
 ```
 
 #### System Instructions

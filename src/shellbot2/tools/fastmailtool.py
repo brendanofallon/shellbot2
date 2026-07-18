@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
 
 import requests
@@ -352,6 +353,53 @@ class FastmailTool:
         else:
             return f"Error: Unknown operation '{operation}'"
         
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="fastmail",
+        description=(
+            "Search and retrieve email messages from a Fastmail account. Supports "
+            "find and get_email_body operations."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["find", "get_email_body"],
+                },
+                "timedelta": {
+                    "type": "string",
+                    "description": "Time period before present for find.",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Text to search across emails.",
+                },
+                "subject_keyword": {
+                    "type": "string",
+                    "description": "Text to search in subjects.",
+                },
+                "sender_keyword": {
+                    "type": "string",
+                    "description": "Text to match against senders.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of emails to return.",
+                },
+                "email_id": {
+                    "type": "string",
+                    "description": "Email ID; required for get_email_body.",
+                },
+            },
+            "required": ["operation"],
+        },
+        factory=lambda _runtime, kwargs: FastmailTool(**kwargs),
+    ),
+)
 
 
 # --- Usage Example ---
