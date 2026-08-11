@@ -49,6 +49,56 @@ All data (message history, logs, configuration) is stored in `~/.shellbot2` by d
 python -m shellbot2.cli --datadir /path/to/data ask "Your prompt"
 ```
 
+### Interactive Chat Mode
+
+Interactive chat mode starts a persistent multi-turn conversation session directly in
+your terminal — no daemon required. The session maintains conversation history across
+turns and supports lightweight slash commands for thread management.
+
+```bash
+# Start an interactive chat session (resumes the most recent thread)
+python -m shellbot2.cli chat
+
+# Start a chat session in a brand-new thread
+python -m shellbot2.cli chat --new-thread
+```
+
+**Features:**
+- Fully interactive REPL — type a message, get a streamed response, repeat
+- No daemon required — the agent runs in the same process
+- Conversation history is saved and resumed across sessions
+- Uses `gum input` for a polished prompt when [gum](https://github.com/charmbracelet/gum) is installed, falls back to standard `input()` otherwise
+- Slash commands for thread management (see below)
+
+**Slash Commands:**
+
+| Command | Description |
+| :--- | :--- |
+| `/new` | Start a fresh conversation thread |
+| `/thread` | Print the current thread ID |
+| `/threads` | List all thread IDs stored in history |
+| `/help` | Show the slash-command reference |
+| `/quit` or `/exit` | Exit the chat session |
+
+Press **Ctrl-C** or **Ctrl-D** to exit at any time.
+
+**Example session:**
+
+```
+$ python -m shellbot2.cli chat
+Thread: 3a8f1c2d-...
+────────────────────────────────────────
+🤖 >  What files are in the current directory?
+ [shell] ls -la
+ ... (streamed response) ...
+────────────────────────────────────────
+🤖 >  /new
+New thread started: 7b2e4f9a-...
+────────────────────────────────────────
+🤖 >  /quit
+Goodbye!
+```
+
 ### Daemon Mode
 
 Daemon mode runs ShellBot2 as a persistent background service that listens for prompts on a ZeroMQ socket. This is ideal for integrating with other applications or running long-lived agent tasks.
