@@ -1,8 +1,17 @@
+<<<<<<< HEAD
 from unittest.mock import MagicMock, patch
 
 from shellbot2.agent import ShellBot3
 from shellbot2.tools.discovery import discover_tool_specs
 from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
+=======
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from shellbot2.agent import ShellBot3, create_azure_provider, _is_azure_foundry_v1_endpoint
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.azure import AzureProvider
+>>>>>>> 463889bfa7604b9953f2d58dfc4ca08fedc67e7a
 
 
 class EchoTool:
@@ -209,3 +218,43 @@ def test_context_dependent_factories_receive_agent_runtime(tmp_path, monkeypatch
         "subtask_modules_dir": tmp_path / "subtask_modules",
         "zmq_input_address": "tcp://127.0.0.1:9999",
     }
+<<<<<<< HEAD
+=======
+    
+    # Initialize bot
+    bot = ShellBot3(datadir=tmp_path)
+    
+    # Check that tools were created based on config
+    assert mock_init_agent.called
+    tools_passed = mock_init_agent.call_args[0][1]
+    
+    # We should have exactly 2 tools loaded
+    assert len(tools_passed) == 2
+    
+    tool_names = [tool.name for tool in tools_passed]
+    assert 'shell' in tool_names
+    assert 'my-custom-tool' in tool_names
+
+def test_azure_foundry_v1_endpoint_detection():
+    assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1/")
+    assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1")
+    assert not _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/")
+
+@patch.dict('os.environ', {
+    'AZURE_FOUNDRY_ENDPOINT': 'https://example.openai.azure.com/openai/v1/',
+    'AZURE_FOUNDRY_API_KEY': 'test-key',
+}, clear=False)
+def test_create_azure_provider_uses_openai_for_foundry_v1():
+    provider = create_azure_provider({})
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.base_url.rstrip('/') == 'https://example.openai.azure.com/openai/v1'
+
+@patch.dict('os.environ', {
+    'AZURE_OPENAI_ENDPOINT': 'https://example.openai.azure.com/',
+    'AZURE_OPENAI_API_KEY': 'test-key',
+    'OPENAI_API_VERSION': '2025-01-01-preview',
+}, clear=False)
+def test_create_azure_provider_uses_azure_for_classic_endpoint():
+    provider = create_azure_provider({})
+    assert isinstance(provider, AzureProvider)
+>>>>>>> 463889bfa7604b9953f2d58dfc4ca08fedc67e7a

@@ -2,10 +2,12 @@
 from functools import wraps
 from pathlib import Path
 import traceback
+from sqlalchemy.util.typing import NoneType
 import yaml
 import uuid
 import logging
 import boto3
+import os
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -14,13 +16,19 @@ from pydantic_ai.providers.bedrock import BedrockProvider
 from ag_ui.core import CustomEvent, RunAgentInput, UserMessage
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai import (
-    Agent, 
+    Agent,
     AgentRunResult,
-    Tool, 
+    Tool,
     ModelMessagesTypeAdapter
 )
 from pydantic_ai.messages import ModelRequest
-        
+
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.azure import AzureProvider
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.context_compaction import ContextCompactionConfig, compact_recent_interactions
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
@@ -52,14 +60,14 @@ class BedrockConfig(BaseModel):
 
 def safe_tool_call(func, tool_name: str):
     """Wrap a tool function to catch exceptions and return error messages.
-    
+
     This prevents exceptions from propagating up and crashing the agent run.
     Instead, errors are returned as text messages that the model can interpret.
-    
+
     Args:
         func: The tool's __call__ method to wrap.
         tool_name: Name of the tool for error messages.
-        
+
     Returns:
         A wrapped function that catches exceptions and returns error text.
     """
@@ -114,6 +122,30 @@ def verify_aws_credentials(boto_session: boto3.Session, profile_name: str):
     return frozen_credentials
 
 
+def _is_azure_foundry_v1_endpoint(endpoint: str | None) -> bool:
+    return bool(endpoint and "/openai/v1" in endpoint.rstrip("/"))
+
+
+def create_azure_provider(conf: dict):
+    """Create a provider for Azure-hosted OpenAI models.
+
+    Azure AI Foundry exposes an OpenAI-compatible v1 API at /openai/v1/, which must
+    use OpenAIProvider. Classic Azure OpenAI deployments use AzureProvider instead.
+    """
+    azure_endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_FOUNDRY_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+
+    if _is_azure_foundry_v1_endpoint(azure_endpoint):
+        return OpenAIProvider(base_url=azure_endpoint.rstrip("/"), api_key=api_key)
+
+    azure_conf = conf.get("azure", {})
+    return AzureProvider(
+        azure_endpoint=azure_endpoint,
+        api_key=api_key,
+        api_version=azure_conf.get("api_version") or os.getenv("OPENAI_API_VERSION"),
+    )
+
+
 def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_profile: str = "BedrockAPI-Access-470052372761", aws_region: str = 'us-west-2'):
     boto_session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
     frozen_credentials = verify_aws_credentials(boto_session, aws_profile)
@@ -139,7 +171,49 @@ class ShellBot3:
         tools = self._create_tools()
         self.agent = self._initialize_agent(self.conf, tools)
         self.event_dispatcher = event_dispatcher
-    
+
+    def _load_tool(self, tool_entry: str | dict, available_specs: dict[str, ToolSpec], runtime: ToolRuntime) -> Tool | None:
+        """
+        Load a single tool from a tool entry (either a bare string or a single element dict with a tool name and one or more kwargs as values)
+        Returns either a Tool or None if the entry was not valid.
+        """
+        if isinstance(tool_entry, str):
+            tool_name = tool_entry
+            tool_kwargs: dict = {}
+        elif isinstance(tool_entry, dict) and len(tool_entry) == 1:
+            tool_name, tool_kwargs = next(iter(tool_entry.items()))
+            if tool_kwargs is None:
+                tool_kwargs = {}
+            elif not isinstance(tool_kwargs, dict):
+                logger.warning(
+                    "Tool %r configuration must be a mapping, got %s.",
+                    tool_name,
+                    type(tool_kwargs).__name__,
+                )
+                return None
+        else:
+            logger.warning(f"Invalid tool configuration entry: {tool_entry}")
+            return None
+
+        tool_spec = available_specs.get(tool_name)
+        if tool_spec is None:
+            logger.warning(f"Tool '{tool_name}' requested in config but not found.")
+            return None
+
+        try:
+            tool_instance = tool_spec.factory(runtime, tool_kwargs)
+            if not callable(tool_instance):
+                raise TypeError(
+                    f"Tool factory for '{tool_name}' returned a non-callable "
+                    f"{type(tool_instance).__name__}"
+                )
+            tool = create_tool_from_spec(tool_spec, tool_instance)
+            logger.debug(f"Initialized tool '{tool_name}'")
+            return tool
+        except Exception as e:
+            logger.exception(f"Failed to initialize tool '{tool_name}'")
+
+
     def _create_tools(self):
         available_specs = discover_tool_specs(self.datadir / "tools")
         configured_tools = self.conf.get("tools")
@@ -154,53 +228,42 @@ class ShellBot3:
         )
         tools = []
         for tool_entry in configured_tools:
-            if isinstance(tool_entry, str):
-                tool_name = tool_entry
-                tool_kwargs: dict = {}
-            elif isinstance(tool_entry, dict) and len(tool_entry) == 1:
-                tool_name, tool_kwargs = next(iter(tool_entry.items()))
-                if tool_kwargs is None:
-                    tool_kwargs = {}
-                elif not isinstance(tool_kwargs, dict):
-                    logger.warning(
-                        "Tool %r configuration must be a mapping, got %s.",
-                        tool_name,
-                        type(tool_kwargs).__name__,
-                    )
-                    continue
+            tool = self._load_tool(tool_entry, available_specs, runtime)
+            if tool != None:
+                tools.append(tool)
             else:
-                logger.warning(f"Invalid tool configuration entry: {tool_entry}")
-                continue
-
-            tool_spec = available_specs.get(tool_name)
-            if tool_spec is None:
-                logger.warning(f"Tool '{tool_name}' requested in config but not found.")
-                continue
-
-            try:
-                tool_instance = tool_spec.factory(runtime, tool_kwargs)
-                if not callable(tool_instance):
-                    raise TypeError(
-                        f"Tool factory for '{tool_name}' returned a non-callable "
-                        f"{type(tool_instance).__name__}"
-                    )
-                tools.append(create_tool_from_spec(tool_spec, tool_instance))
-                logger.debug(f"Initialized tool '{tool_name}'")
-            except Exception as e:
-                logger.error(f"Failed to initialize tool '{tool_name}': {e}", exc_info=True)
+                raise ValueError(f"Could not load tool {tool_entry}, aborting")
 
         return tools
+
 
     def _initialize_agent(self, conf, tools):
         instructions = conf.get("instructions", "You are a friendly assistant")
         if conf.get("provider") == "bedrock":
             bedrock_conf = conf.get("bedrock", {})
             model = initialize_bedrock_model(conf.get("model"), aws_profile=bedrock_conf.get("profile", "BedrockAPI-Access-470052372761"), aws_region=bedrock_conf.get('region', 'us-west-2') )
-            
+
             return Agent(model=model, instructions=instructions, tools=tools)
+        elif conf.get("provider") == "azure":
+            provider = create_azure_provider(conf)
+            if "gpt" in conf.get("model"):
+                logger.info(f"Creating model {conf.get('provider')}: {conf.get('model')}")
+                return Agent(
+                    model = OpenAIChatModel(conf.get("model"), provider=provider, settings={"reasoning_effort": "medium"}),
+                    instructions=instructions,
+                    tools=tools,
+                )
+            else:
+                raise ValueError("Only GPT models supported in Azure now")
+        elif conf.get("provider") == "openrouter":
+            return Agent(
+                f"openrouter:{conf.get('model')}",
+                instructions=instructions,
+                tools=tools,
+            )
         else:
             return Agent(
-                conf.get("model", "google-gla:gemini-3-flash-preview"),
+                conf.get("model"),
                 instructions=instructions,
                 tools=tools,
             )
@@ -242,7 +305,7 @@ class ShellBot3:
         )
 
         runresult = None
-        
+
         def on_complete(result: AgentRunResult):
             nonlocal runresult
             try:
@@ -280,5 +343,5 @@ class ShellBot3:
                 f"Response: {usage.response_tokens}, "
                 f"Total: {usage.total_tokens}"
             )
-        
+
         return runresult

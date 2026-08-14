@@ -1,6 +1,8 @@
 # ShellBot2
 
-An AI agent daemon that uses ZeroMQ for input/output communication.
+An AI agent harness that integrates easily into a shell and runs as a persistent service, using ZeroMQ for input/output communication. OK, so there's also a 'direct' mode for when you don't want to deal with the daemon, but the daemon-mode
+enables the agent to respond to non-user-initiated events. Maybe someday we'll implement sensors, or recurrent checks
+on for things like new emails, calendar events, 
 
 ## Architecture
 
