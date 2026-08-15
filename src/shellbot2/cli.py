@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import logging
 import os
 import signal
@@ -22,6 +22,7 @@ from shellbot2.tools.memorytool import MemoryTool
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+CLI_CLIENT_ID = "cli"
 
 def setup_logging(datadir: Path, stream_to_stdout: bool = False) -> None:
     """Configure logging to write to shellbot3.log in the datadir.
@@ -62,14 +63,62 @@ def get_ask_presence_file(datadir: Path) -> Path:
     return datadir / "daemon_ask.presence"
 
 
+def resolve_cli_thread_id(datadir: Path, *, new_thread: bool) -> str:
+    """Return and persist the CLI's current conversation thread.
+
+    The initial lookup supports existing message-history databases by excluding
+    configured sensor threads. Once selected, the client pointer is the sole
+    source of truth, so background sensor activity cannot change it.
+    """
+
+    message_history = MessageHistory(datadir / "message_history.db")
+    if new_thread:
+        thread_id = str(uuid.uuid4())
+    else:
+        thread_id = message_history.get_active_thread_id(CLI_CLIENT_ID)
+        if thread_id is None:
+            conf = load_conf(datadir)
+            thread_id = message_history.get_most_recent_thread_id(
+                excluded_thread_ids=_configured_sensor_thread_ids(conf)
+            )
+        if thread_id is None:
+            thread_id = str(uuid.uuid4())
+
+    message_history.set_active_thread_id(CLI_CLIENT_ID, thread_id)
+    return thread_id
+
+
+def _configured_sensor_thread_ids(conf: Mapping[str, object]) -> set[str]:
+    """Return thread IDs explicitly reserved by enabled sensor entries."""
+
+    sensors = conf.get("sensors")
+    if not isinstance(sensors, Mapping) or sensors.get("enabled") is not True:
+        return set()
+
+    entries = sensors.get("entries")
+    if not isinstance(entries, list):
+        return set()
+
+    thread_ids: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping) or entry.get("enabled", True) is not True:
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        thread_id = entry.get("thread_id", f"sensor:{name}")
+        if isinstance(thread_id, str) and thread_id.strip():
+            thread_ids.add(thread_id)
+    return thread_ids
+
+
 async def run_prompt(args: argparse.Namespace) -> None:
     """Run a prompt directly through the agent."""
     logger = logging.getLogger(__name__)
     logger.info(f"Running prompt: {args.prompt[:100]}...")
     
-    thread_id = None
+    thread_id = resolve_cli_thread_id(args.datadir, new_thread=args.new_thread)
     if args.new_thread:
-        thread_id = str(uuid.uuid4())
         logger.info(f"Starting new thread with ID: {thread_id}")
     
     cwd = os.getcwd()
@@ -188,9 +237,8 @@ async def daemon_ask(args: argparse.Namespace) -> None:
     
     logger.info(f"Sending prompt to daemon at {input_address}: {args.prompt[:100]}...")
     
-    thread_id = None
+    thread_id = resolve_cli_thread_id(args.datadir, new_thread=args.new_thread)
     if args.new_thread:
-        thread_id = str(uuid.uuid4())
         logger.info(f"Starting new daemon thread with ID: {thread_id}")
 
     cwd = os.getcwd()
@@ -200,9 +248,8 @@ async def daemon_ask(args: argparse.Namespace) -> None:
         "prompt": prompt,
         "source": "cli",
         "datetime": datetime.now().isoformat(),
+        "thread_id": thread_id,
     }
-    if thread_id is not None:
-        message["thread_id"] = thread_id
     
     context = zmq.Context()
     

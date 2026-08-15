@@ -21,6 +21,13 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_identifier(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return value
+
+
 class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
     pass
@@ -47,6 +54,16 @@ class Message(Base):
     
     def __repr__(self) -> str:
         return f"<Message(id={self.id}, thread_id={self.thread_id}, interaction_id={self.interaction_id}, created_at={self.created_at})>"
+
+
+class ActiveClientThread(Base):
+    """Durable current-thread selection for a named interactive client."""
+
+    __tablename__ = "active_client_threads"
+
+    client_id = Column(String, primary_key=True)
+    thread_id = Column(String, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 @dataclass
@@ -352,7 +369,37 @@ class MessageHistory:
                 query = query.filter(Message.thread_id == thread_id)
             return query.count()
     
-    def get_most_recent_thread_id(self) -> Optional[str]:
+    def get_active_thread_id(self, client_id: str) -> Optional[str]:
+        """Return the durable current thread selected by ``client_id``."""
+
+        client_id = _validate_identifier(client_id, "client_id")
+        with self.SessionLocal() as session:
+            active_thread = session.get(ActiveClientThread, client_id)
+            return active_thread.thread_id if active_thread else None
+
+    def set_active_thread_id(self, client_id: str, thread_id: str) -> None:
+        """Set the durable current thread selected by ``client_id``."""
+
+        client_id = _validate_identifier(client_id, "client_id")
+        thread_id = _validate_identifier(thread_id, "thread_id")
+        with self.SessionLocal() as session:
+            active_thread = session.get(ActiveClientThread, client_id)
+            if active_thread is None:
+                session.add(
+                    ActiveClientThread(
+                        client_id=client_id,
+                        thread_id=thread_id,
+                        updated_at=datetime.now(),
+                    )
+                )
+            else:
+                active_thread.thread_id = thread_id
+                active_thread.updated_at = datetime.now()
+            session.commit()
+
+    def get_most_recent_thread_id(
+        self, excluded_thread_ids: set[str] | None = None
+    ) -> Optional[str]:
         """
         Get the thread_id of the most recently added message.
         
@@ -360,11 +407,10 @@ class MessageHistory:
             The thread_id of the most recent message, or None if no messages exist.
         """
         with self.SessionLocal() as session:
-            most_recent = (
-                session.query(Message)
-                .order_by(desc(Message.created_at))
-                .first()
-            )
+            query = session.query(Message)
+            if excluded_thread_ids:
+                query = query.filter(Message.thread_id.notin_(excluded_thread_ids))
+            most_recent = query.order_by(desc(Message.created_at), desc(Message.id)).first()
             return most_recent.thread_id if most_recent else None
 
     @staticmethod
