@@ -1,13 +1,18 @@
 # ShellBot2
 
-An AI agent harness that integrates easily into a shell and runs as a persistent service, using ZeroMQ for input/output communication. OK, so there's also a 'direct' mode for when you don't want to deal with the daemon, but the daemon-mode
-enables the agent to respond to non-user-initiated events. Maybe someday we'll implement sensors, or recurrent checks
-on for things like new emails, calendar events, 
+An AI agent harness that integrates easily into a shell and runs as a persistent service, using ZeroMQ for input/output communication. There is also a 'direct' mode for when you don't want to deal with the daemon. Daemon mode
+enables the agent to respond to user messages and, when configured, to **sensor** events: opt-in scheduled plugins that
+observe local or external state and enqueue a structured observation onto the daemon's serialized agent queue. 
+
+The persistent daemon architecture with a message broker allows a lot of flexibility for how inputs are generated and 
+where outputs go. Its easy enough to have a cli client that gives the user the ability to send a message, but input messages could easily come from sensors, web clients, other agents etc. Likewise, output messages (in the form of
+[AGUI streams](https://docs.ag-ui.com/introduction)) can be rendered in many places - the terminal, a web client, etc
 
 ## Architecture
 
 The AgentDaemon provides a persistent service that:
 - **Listens** for JSON-formatted InputMessages on a ZeroMQ PULL socket (input)
+- **Queues** user messages and optional sensor observations on one FIFO work queue so only one agent run executes at a time
 - **Publishes** AG-UI events as JSON on a ZeroMQ PUSH socket (output)
 - Only writes log messages to stdout (all agent output goes through ZeroMQ)
 
@@ -115,11 +120,6 @@ python -m shellbot2.cli daemon watch
 - Resets its state after each `daemon ask` session to avoid displaying stale data
 - Ideal for leaving open in a terminal to monitor background activity
 
-**Use cases:**
-- Monitoring subtask alerts and notifications
-- Watching background agent activities
-- Debugging daemon behavior
-- Keeping track of scheduled or automated tasks
 
 ### Sending Messages to the Daemon
 
@@ -176,21 +176,137 @@ while True:
 
 See `examples/zmq_client.py` for a complete example.
 
-## Event Types
 
-The daemon streams these AG-UI event types:
-- `RUN_START`: Agent run begins
-- `TEXT_MESSAGE_START`: Text message begins
-- `TEXT_MESSAGE_CONTENT`: Text content delta
-- `TEXT_MESSAGE_END`: Text message completes
-- `TOOL_CALL_START`: Tool invocation begins
-- `TOOL_CALL_ARGS`: Tool arguments (streaming)
-- `TOOL_CALL_END`: Tool call completes
-- `TOOL_CALL_RESULT`: Tool execution result
-- `RUN_FINISHED`: Agent run completes successfully
-- `RUN_ERROR`: Agent run encountered an error
+## Sensors
 
-Each event is a JSON object with a `type` field and type-specific fields.
+Sensors are **opt-in scheduled plugins** that run inside the daemon. They periodically observe a data source and, when something notable happens, emit a structured observation. The framework turns that observation into a normal agent turn on the same FIFO queue used for ZeroMQ user messages, so only one `agent.run()` executes at a time.
+
+A sensor is not a tool. It has no LLM, cannot call the agent or ZeroMQ, and does not get extra privileges. It returns facts; only framework-owned code may turn those facts into a prompt. That prompt is labeled as **untrusted external data**, so a raw email subject, web response, or other payload cannot act as an instruction.
+
+If the `sensors` section is omitted from `agent_conf.yaml` or `enabled` is not `true`, the daemon does not discover or schedule any sensors.
+
+### How the framework works
+
+Two packages are involved:
+
+- **`shellbot2.sensorframework`** owns discovery, YAML validation, the poll scheduler, namespaced SQLite state, deduplication/cooldowns, and prompt rendering.
+- **`shellbot2.sensors`** holds packaged implementations (currently `disk_usage`). Custom plugins can also live as `*.py` files under `<datadir>/sensors/` (for example `~/.shellbot2/sensors/`).
+
+At daemon startup, if sensors are enabled:
+
+1. The framework discovers `SENSOR_SPECS` from packaged modules and from `<datadir>/sensors/*.py`. A custom spec with the same `name` as a packaged one replaces it. Duplicate names in the same source, import errors, and invalid specs are logged and skipped.
+2. Configured entries are validated. An **enabled** entry that names a missing plugin fails startup. A **disabled** entry that names a missing plugin logs a warning and is ignored.
+3. One asyncio task is started per enabled sensor. Each sensor is constructed once, polled immediately, then polled again only after `interval_seconds` has elapsed **since the previous poll finished** (polls never overlap).
+4. Each `SensorObservation` is checked against durable delivery state keyed by `(sensor_name, dedupe_key)`. The same key is not enqueued again until `cooldown_seconds` has passed since the last **successful** enqueue.
+5. A successful enqueue is converted with a framework-owned template into an `InputMessage` (`source` is `sensor:<name>`). User and sensor messages share one bounded FIFO queue and one agent worker.
+6. If the queue is full, the sensor event is dropped and **not** marked delivered, so a later poll may retry. Delivery is at-most-once successful queue insertion per cooldown window: a crash after enqueue and before the agent run finishes can produce a later duplicate.
+
+Plugin failures are fail-closed: a broken import, factory, or `poll()` is logged and retried on the next interval. It cannot stop other sensors or terminate the daemon.
+
+State lives in SQLite (`sensor_state.db` under the data directory by default). Each plugin may `get` / `set` / `delete` JSON-safe values in its own namespace. Framework cooldown records use a reserved namespace a plugin cannot overwrite.
+
+### Writing a sensor
+
+A plugin is a single Python module. It does not subclass a framework base class. It must export `SENSOR_SPECS`, an iterable of `SensorSpec` objects:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | yes | YAML key and state namespace. A letter, then up to 63 letters, digits, `_`, or `-`. |
+| `description` | yes | Human-readable description. |
+| `factory` | yes | `factory(runtime) -> sensor`. Called once per daemon start (retried after the interval if it raises). |
+| `default_interval_seconds` | no | Positive interval used when the YAML entry omits `interval_seconds` (library default 300). |
+
+The object returned by `factory` needs one async method:
+
+```python
+async def poll(self, runtime: SensorRuntime) -> Sequence[SensorObservation]
+```
+
+Return an empty sequence when nothing notable happened. Do not call the agent, ZeroMQ, or the event dispatcher. Catch local I/O errors and return `[]` rather than raising, unless you want the scheduler to count a failure and retry later.
+
+`SensorRuntime` is injected by the framework:
+
+- `datadir` — the daemon data directory
+- `sensor_name` — this plugin's configured name
+- `config` — **this sensor's** `config:` mapping only, not the full `agent_conf.yaml`
+- `state` — namespaced `get` / `set` / `delete` for JSON-serializable values
+- `logger` — a logger for this sensor
+- `now()` — injected clock (use this instead of `datetime.now()` so tests can freeze time)
+
+Each observation is data, never a prompt:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `kind` | yes | Short stable event type local to the sensor (single line). |
+| `summary` | yes | Concise factual description for a human (size-bounded). |
+| `dedupe_key` | yes | Stable id for this condition. Used only by the framework for cooldown; it is not an instruction to the model. |
+| `payload` | no | JSON object of structured details (size-bounded). |
+| `occurred_at` | no | `datetime`; defaults to the scheduler clock. |
+| `severity` | no | `info`, `warning`, or `critical` (metadata only). |
+
+Plugins cannot supply a ready-made prompt or system/developer message. The framework wraps `kind`, `severity`, time, `summary`, and JSON `payload` in a delimited untrusted-data block. Large payloads may be truncated in the prompt; the bounded payload is still stored on message metadata.
+
+Minimal custom plugin (`~/.shellbot2/sensors/example_sensor.py`):
+
+```python
+from shellbot2.sensorframework import SensorObservation, SensorRuntime, SensorSpec
+
+
+class ExampleSensor:
+    async def poll(self, runtime: SensorRuntime):
+        seen = runtime.state.get("seen")
+        if seen:
+            return []
+        runtime.state.set("seen", True)
+        return [
+            SensorObservation(
+                kind="first_run",
+                summary="Example sensor completed its first poll.",
+                dedupe_key="first-run",
+                payload={"source": "example"},
+            )
+        ]
+
+
+SENSOR_SPECS = (
+    SensorSpec(
+        name="example_sensor",
+        description="Illustrative plugin; not bundled with ShellBot2.",
+        factory=lambda runtime: ExampleSensor(),
+        default_interval_seconds=300,
+    ),
+)
+```
+
+Enable it in `agent_conf.yaml` (see [Sensors configuration](#sensors-configuration) for every field):
+
+```yaml
+sensors:
+  enabled: true
+  entries:
+    - name: example_sensor
+      enabled: true
+```
+
+Leave `daemon watch` running to see the resulting agent turn. Sensor output uses the same ZeroMQ event stream as a user prompt.
+
+### Bundled `disk_usage` sensor
+
+`disk_usage` is an illustrative packaged plugin. It polls once per hour by default and emits a `low_disk_space` warning when free space on a path is **less than** `min_free_percent` (default 10). It uses `shutil.disk_usage` only; it does not run a shell.
+
+```yaml
+sensors:
+  enabled: true
+  entries:
+    - name: disk_usage
+      enabled: true
+      cooldown_seconds: 0    # re-alert every poll while the condition holds
+      config:
+        path: /              # optional; defaults to the datadir's filesystem root
+        min_free_percent: 10
+```
+
+There are no bundled mail, calendar, traffic, or hardware sensors.
 
 ## Configuration: agent_conf.yaml
 
@@ -236,6 +352,7 @@ tools:
     - fastmail           # Email integration (requires credentials)
     - calendar           # Calendar integration (requires credentials)
     - image-generator    # Generate images
+    - desktop-notification # Native desktop notifications with optional replies
     - memory             # Store and retrieve persistent memories
     - document-store:    # Document storage with semantic search
         store_id: your-store-id-here
@@ -246,6 +363,18 @@ instructions: >
     You are a helpful AI assistant. You can execute shell commands,
     run Python code, search the web, and more. Always explain your
     reasoning and provide detailed responses.
+
+# Sensors (optional, opt-in)
+# If this section is omitted or enabled is false, the daemon does not
+# discover or schedule any sensors.
+# sensors:
+#   enabled: true
+#   entries:
+#     - name: disk_usage
+#       enabled: true
+#       config:
+#         path: /
+#         min_free_percent: 10
 ```
 
 ### Configuration Fields
@@ -318,6 +447,18 @@ instructions: >
     - `file-search`: Search files using regex
     - `text_replace`: Replace exact text occurrences in a single file
     - `notes`: Search and list personal notes
+    - `desktop-notification`: Send native desktop notifications, optionally
+      collecting a text reply from the user
+
+`desktop-notification` exposes the model-facing function
+`send_desktop_notification`. It requires a notification `title` and `message`;
+`urgency`, `sound`, `thread`, and native display timeout are optional. Set
+`reply_prompt` to include a text-reply field. The tool waits up to
+`reply_timeout_seconds` (120 seconds by default), then returns a structured
+result containing the notification ID, status (`replied`, `dismissed`,
+`reply_timed_out`, or `reply_not_supported`), and the text response when one
+was submitted. On macOS, the Python executable must be signed for native
+notifications to be delivered.
 
 Example with tool configuration:
 ```yaml
@@ -351,6 +492,36 @@ TOOL_SPECS = (
     ),
 )
 ```
+
+#### Sensors configuration
+
+See [Sensors](#sensors) for how the framework works and how to write a plugin. This section only documents `agent_conf.yaml` fields.
+
+No sensor is loaded unless `sensors.enabled` is `true` and the sensor is listed under `entries` (entry `enabled` defaults to `true`). If the section is absent or `enabled` is not `true`, daemon behavior is unchanged.
+
+```yaml
+sensors:
+  enabled: true
+  state_db: sensor_state.db          # relative to datadir unless absolute
+  default_interval_seconds: 300
+  queue_maxsize: 100
+  entries:
+    - name: disk_usage
+      enabled: true
+      interval_seconds: 3600         # optional; otherwise the spec default
+      cooldown_seconds: 0            # optional; default 0
+      thread_id: sensor:disk_usage   # optional; default sensor:<name>
+      config:                        # optional; passed only to this plugin
+        path: /
+        min_free_percent: 10
+```
+
+- **`enabled`** (optional, default treated as false): must be `true` to discover and schedule sensors.
+- **`state_db`** (optional, default `sensor_state.db`): SQLite path, relative to the data directory unless absolute.
+- **`default_interval_seconds`** (optional, default `300`): global default used when resolving intervals.
+- **`queue_maxsize`** (optional, default `100`): bound on the daemon's shared user/sensor work queue.
+- **`entries`**: list of mappings. Required per entry: **`name`**. Optional: **`enabled`**, **`interval_seconds`**, **`cooldown_seconds`**, **`thread_id`**, **`config`**.
+- An enabled entry that names a missing plugin fails daemon startup. A disabled entry that names a missing plugin logs a warning and is ignored.
 
 #### System Instructions
 

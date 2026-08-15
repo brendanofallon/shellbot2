@@ -22,6 +22,7 @@ dependencies = [
     "streamlit>=1.54.0",
     "tavily>=1.1.0",
     "trafilatura>=2.0.0",
+    "desktop-notifier>=6.2.0",
 ]
 
 [project.scripts]

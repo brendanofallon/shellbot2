@@ -1,5 +1,6 @@
 
 from functools import wraps
+import inspect
 from pathlib import Path
 import traceback
 from sqlalchemy.util.typing import NoneType
@@ -71,6 +72,21 @@ def safe_tool_call(func, tool_name: str):
     Returns:
         A wrapped function that catches exceptions and returns error text.
     """
+    if inspect.iscoroutinefunction(func):
+
+        @wraps(func)
+        async def async_wrapper(**kwargs):
+            try:
+                return await func(**kwargs)
+            except Exception as e:
+                error_type = type(e).__name__
+                error_msg = str(e)
+                tb = traceback.format_exc()
+                logger.error(f"Error in tool '{tool_name}': {error_type}: {error_msg}\n{tb}")
+                return f"Error executing tool '{tool_name}': {error_type}: {error_msg}"
+
+        return async_wrapper
+
     @wraps(func)
     def wrapper(**kwargs):
         try:
@@ -81,6 +97,7 @@ def safe_tool_call(func, tool_name: str):
             tb = traceback.format_exc()
             logger.error(f"Error in tool '{tool_name}': {error_type}: {error_msg}\n{tb}")
             return f"Error executing tool '{tool_name}': {error_type}: {error_msg}"
+
     return wrapper
 
 
