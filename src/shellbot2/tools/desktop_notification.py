@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
-import platform
+import logging
 from typing import Any
 
 from desktop_notifier import (
@@ -15,6 +15,8 @@ from desktop_notifier import (
 
 from shellbot2.tools.tool_spec import ToolSpec
 
+
+logger = logging.getLogger(__name__)
 
 NotificationResult = dict[str, str | None]
 
@@ -58,8 +60,7 @@ class DesktopNotificationTool:
             thread=thread,
             sound=sound,
         )
-        return await asyncio.to_thread(
-            self._run_notification_loop,
+        return await self._send_notification(
             title=title,
             message=message,
             urgency=urgency,
@@ -70,26 +71,6 @@ class DesktopNotificationTool:
             thread=thread,
             sound=sound,
         )
-
-    def _run_notification_loop(self, **kwargs: Any) -> NotificationResult:
-        """Run a dedicated event loop so native callbacks remain active."""
-
-        loop = self._create_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._send_notification(**kwargs))
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-    @staticmethod
-    def _create_event_loop() -> asyncio.AbstractEventLoop:
-        if platform.system() == "Darwin":
-            # macOS notification callbacks require a running Core Foundation loop.
-            from rubicon.objc.eventloop import CFEventLoop
-
-            return CFEventLoop()
-        return asyncio.new_event_loop()
 
     async def _send_notification(
         self,
@@ -121,6 +102,10 @@ class DesktopNotificationTool:
 
             def resolve_response(status: str, response: str | None) -> None:
                 if not response_future.done():
+                    logger.info(
+                        "Desktop notification interaction received: status=%s",
+                        status,
+                    )
                     response_future.set_result({"status": status, "response": response})
 
             def on_replied(response: str) -> None:
@@ -154,6 +139,11 @@ class DesktopNotificationTool:
             thread=thread,
             timeout=notification_timeout_seconds,
         )
+        logger.info(
+            "Desktop notification scheduled: id=%s reply_requested=%s",
+            notification_id,
+            reply_prompt is not None,
+        )
         if not reply_supported:
             return {
                 "notification_id": notification_id,
@@ -174,6 +164,11 @@ class DesktopNotificationTool:
             )
         except asyncio.TimeoutError:
             response_future.cancel()
+            logger.warning(
+                "Desktop notification reply timed out: id=%s timeout_seconds=%s",
+                notification_id,
+                reply_timeout_seconds,
+            )
             result = {"status": "reply_timed_out", "response": None}
         return {"notification_id": notification_id, **result}
 
@@ -220,7 +215,7 @@ class DesktopNotificationTool:
 
 TOOL_SPECS = (
     ToolSpec(
-        name="desktop-notification",
+        name="desktop-notifier",
         function_name="send_desktop_notification",
         description=(
             "Send a native desktop notification. Optionally include a text reply "

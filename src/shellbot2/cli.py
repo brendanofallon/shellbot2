@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from collections.abc import Callable
 import logging
 import os
 import signal
@@ -85,7 +86,10 @@ async def run_prompt(args: argparse.Namespace) -> None:
         raise
 
 
-async def daemon_start(args: argparse.Namespace) -> None:
+async def daemon_start(
+    args: argparse.Namespace,
+    on_daemon_ready: Callable[[object], None] | None = None,
+) -> None:
     """Start the agent daemon."""
     from shellbot2.daemon import AgentDaemon
     
@@ -117,6 +121,8 @@ async def daemon_start(args: argparse.Namespace) -> None:
     logger.info(f"Starting daemon with PID {pid}, input_address={input_address}, output_address={output_address}")
     
     daemon = AgentDaemon(datadir=args.datadir)
+    if on_daemon_ready is not None:
+        on_daemon_ready(daemon)
     
     try:
         await daemon.start()
@@ -447,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def main() -> None:
+async def main(on_daemon_ready: Callable[[object], None] | None = None) -> None:
     parser = build_parser()
     
     args = parser.parse_args()
@@ -466,7 +472,7 @@ async def main() -> None:
         await run_prompt(args)
     elif args.command == 'daemon':
         if args.daemon_command == 'start':
-            await daemon_start(args)
+            await daemon_start(args, on_daemon_ready=on_daemon_ready)
         elif args.daemon_command == 'stop':
             daemon_stop(args)
         elif args.daemon_command == 'ask':

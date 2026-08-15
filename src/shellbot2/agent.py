@@ -174,6 +174,7 @@ def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_pro
     )
     return BedrockConverseModel(model, provider=provider)
 
+
 class ShellBot3:
     def __init__(self, datadir: Path, thread_id: str = None, event_dispatcher: EventDispatcher = None):
         self.message_history = MessageHistory(datadir / "message_history.db")
@@ -248,6 +249,7 @@ class ShellBot3:
             tool = self._load_tool(tool_entry, available_specs, runtime)
             if tool != None:
                 tools.append(tool)
+                logger.info(f"Loaded tool {tool_entry}")
             else:
                 raise ValueError(f"Could not load tool {tool_entry}, aborting")
 
@@ -256,11 +258,12 @@ class ShellBot3:
 
     def _initialize_agent(self, conf, tools):
         instructions = conf.get("instructions", "You are a friendly assistant")
+        logger.info(f"Creating agent with model {conf.get('model')}")
         if conf.get("provider") == "bedrock":
             bedrock_conf = conf.get("bedrock", {})
             model = initialize_bedrock_model(conf.get("model"), aws_profile=bedrock_conf.get("profile", "BedrockAPI-Access-470052372761"), aws_region=bedrock_conf.get('region', 'us-west-2') )
-
             return Agent(model=model, instructions=instructions, tools=tools)
+
         elif conf.get("provider") == "azure":
             provider = create_azure_provider(conf)
             if "gpt" in conf.get("model"):

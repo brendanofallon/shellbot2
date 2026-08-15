@@ -352,7 +352,8 @@ tools:
     - fastmail           # Email integration (requires credentials)
     - calendar           # Calendar integration (requires credentials)
     - image-generator    # Generate images
-    - desktop-notification # Native desktop notifications with optional replies
+    - desktop-notifier    # Native desktop notifications with optional replies
+    - pushover           # Push notifications through Pushover
     - memory             # Store and retrieve persistent memories
     - document-store:    # Document storage with semantic search
         store_id: your-store-id-here
@@ -447,10 +448,11 @@ instructions: >
     - `file-search`: Search files using regex
     - `text_replace`: Replace exact text occurrences in a single file
     - `notes`: Search and list personal notes
-    - `desktop-notification`: Send native desktop notifications, optionally
+    - `desktop-notifier`: Send native desktop notifications, optionally
       collecting a text reply from the user
+    - `pushover`: Send push notifications through Pushover
 
-`desktop-notification` exposes the model-facing function
+`desktop-notifier` exposes the model-facing function
 `send_desktop_notification`. It requires a notification `title` and `message`;
 `urgency`, `sound`, `thread`, and native display timeout are optional. Set
 `reply_prompt` to include a text-reply field. The tool waits up to
@@ -460,11 +462,30 @@ result containing the notification ID, status (`replied`, `dismissed`,
 was submitted. On macOS, the Python executable must be signed for native
 notifications to be delivered.
 
+For local macOS use, `bash scripts/build_macos_app.sh` builds an ad-hoc-signed
+`dist/ShellBot2.app` and launches it in daemon mode. It requires no Apple
+Developer account; enable notifications for ShellBot2 in System Settings after
+the app first launches.
+
+`pushover` exposes `send_pushover_notification`. It requires a `message`; omit
+`title` and `sound` to use the Pushover application's name and the user's
+configured sound. It supports Pushover's device targeting, priorities, custom
+sounds, HTML or monospace formatting, TTL, and supplementary URLs. Priorities
+range from `-2` (lowest) to `1` (high).
+
+Before enabling the tool, [register a Pushover application](https://pushover.net/api#messages)
+and export both of its required credentials:
+```sh
+export PUSHOVER_USER_KEY="your-user-or-group-key"
+export PUSHOVER_APP_TOKEN="your-application-token"
+```
+
 Example with tool configuration:
 ```yaml
 tools:
     - shell
     - python
+    - pushover
     - my-custom-tool   # Discovered from ~/.shellbot2/tools/my_custom_tool.py
     - document-store:
         store_id: 903cb699-de81-4507-9e9a-17befc2c6ac8
@@ -590,5 +611,6 @@ Some tools require external credentials:
 - **Calendar**: Requires Google Calendar API credentials
 - **Tavily Search**: Requires Tavily API key
 - **Document Store**: Requires a configured document store ID
+- **Pushover**: Requires `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN`
 
 Credentials are typically stored separately from `agent_conf.yaml` for security.
