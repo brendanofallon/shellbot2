@@ -96,6 +96,12 @@ class PushoverNotificationTool:
 
         if isinstance(device, str) and not device.strip():
             device = None
+        # Tool callers commonly represent omitted optional URL fields as empty strings.
+        # Normalize them before validating the url/url_title dependency.
+        if isinstance(url, str) and not url.strip():
+            url = None
+        if isinstance(url_title, str) and not url_title.strip():
+            url_title = None
         self._validate_arguments(
             message=message,
             title=title,

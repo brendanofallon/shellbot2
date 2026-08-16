@@ -49,6 +49,11 @@ class DesktopNotificationTool:
     ) -> NotificationResult:
         """Send a notification and, when requested, wait for its text response."""
 
+        # Tool callers commonly represent an omitted optional field as an empty string.
+        # A blank prompt cannot create a useful reply field, so treat it as omitted.
+        if isinstance(reply_prompt, str) and not reply_prompt.strip():
+            reply_prompt = None
+
         self._validate_arguments(
             title=title,
             message=message,
