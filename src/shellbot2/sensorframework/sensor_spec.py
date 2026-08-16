@@ -2,8 +2,9 @@
 
 Sensors emit structured facts, never executable instructions. A plugin returns
 typed observations; only framework-owned code may turn those observations into
-an agent prompt. Plugins must not call the agent, ZeroMQ, or the event
-dispatcher.
+a prompt for the daemon's conversation agent. Plugins must not call that agent,
+ZeroMQ, or the event dispatcher. A plugin may use a separate, tightly scoped
+LLM for local inference when its implementation explicitly provides one.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -167,7 +168,7 @@ class Sensor(Protocol):
     """A polling plugin that returns zero or more observations.
 
     Return an empty sequence when nothing notable has happened. Do not call the
-    agent, ZeroMQ, or the event dispatcher.
+    daemon's conversation agent, ZeroMQ, or the event dispatcher.
     """
 
     async def poll(self, runtime: SensorRuntime) -> Sequence[SensorObservation]:

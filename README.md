@@ -181,7 +181,7 @@ See `examples/zmq_client.py` for a complete example.
 
 Sensors are **opt-in scheduled plugins** that run inside the daemon. They periodically observe a data source and, when something notable happens, emit a structured observation. The framework turns that observation into a normal agent turn on the same FIFO queue used for ZeroMQ user messages, so only one `agent.run()` executes at a time.
 
-A sensor is not a tool. It has no LLM, cannot call the agent or ZeroMQ, and does not get extra privileges. It returns facts; only framework-owned code may turn those facts into a prompt. That prompt is labeled as **untrusted external data**, so a raw email subject, web response, or other payload cannot act as an instruction.
+A sensor is not a daemon tool. It cannot call the daemon's conversation agent or ZeroMQ, and it returns facts; only framework-owned code may turn those facts into a daemon prompt. A carefully scoped sensor may use its own isolated LLM with only the capabilities supplied by that sensor. The daemon prompt is labeled as **untrusted external data**, so a raw email subject, web response, or other payload cannot act as an instruction.
 
 If the `sensors` section is omitted from `agent_conf.yaml` or `enabled` is not `true`, the daemon does not discover or schedule any sensors.
 
@@ -190,7 +190,7 @@ If the `sensors` section is omitted from `agent_conf.yaml` or `enabled` is not `
 Two packages are involved:
 
 - **`shellbot2.sensorframework`** owns discovery, YAML validation, the poll scheduler, namespaced SQLite state, deduplication/cooldowns, and prompt rendering.
-- **`shellbot2.sensors`** holds packaged implementations (currently `disk_usage` and `fastmail_email`). Custom plugins can also live as `*.py` files under `<datadir>/sensors/` (for example `~/.shellbot2/sensors/`).
+- **`shellbot2.sensors`** holds packaged implementations (currently `disk_usage`, `fastmail_email`, and `user_activity`). Custom plugins can also live as `*.py` files under `<datadir>/sensors/` (for example `~/.shellbot2/sensors/`).
 
 At daemon startup, if sensors are enabled:
 
@@ -222,7 +222,7 @@ The object returned by `factory` needs one async method:
 async def poll(self, runtime: SensorRuntime) -> Sequence[SensorObservation]
 ```
 
-Return an empty sequence when nothing notable happened. Do not call the agent, ZeroMQ, or the event dispatcher. Catch local I/O errors and return `[]` rather than raising, unless you want the scheduler to count a failure and retry later.
+Return an empty sequence when nothing notable happened. Do not call the daemon's conversation agent, ZeroMQ, or the event dispatcher. Catch local I/O errors and return `[]` rather than raising, unless you want the scheduler to count a failure and retry later.
 
 `SensorRuntime` is injected by the framework:
 
@@ -328,6 +328,28 @@ sensors:
 
 Messages are fetched oldest first, so a busy mailbox is drained in bounded
 batches without skipping older new mail.
+
+### Bundled `user_activity` sensor
+
+`user_activity` uses an isolated model and two read-only tools to produce a
+rough summary of recent work. The model can list the newest regular files below
+the user's home directory, then read a bounded amount of UTF-8 text, PDF, or
+DOCX content from home-directory files. File contents and paths are explicitly
+treated as untrusted data, and the model has no shell, network, write, or
+daemon-agent access. It emits one `user_activity_summary` observation per poll;
+the framework's usual cooldown can suppress duplicate summaries.
+
+```yaml
+sensors:
+  enabled: true
+  entries:
+    - name: user_activity
+      enabled: true
+      interval_seconds: 1800
+      cooldown_seconds: 0
+      config:
+        recent_file_count: 20       # 1–100 files exposed to the model's first scan
+```
 
 There are no bundled calendar, traffic, or hardware sensors.
 
