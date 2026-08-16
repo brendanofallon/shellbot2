@@ -7,14 +7,14 @@ dispatcher.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Annotated, Any, Literal, Protocol, Self, runtime_checkable
 import json
 import logging
 import re
+
+from pydantic import BaseModel, ConfigDict, Field, SkipValidation, StrictInt, field_validator, model_validator
 
 JSONValue = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
 
@@ -89,24 +89,24 @@ class SensorStateStore(Protocol):
         """Remove ``key`` if it exists."""
 
 
-@dataclass(frozen=True, slots=True)
-class SensorRuntime:
+class SensorRuntime(BaseModel):
     """Dependencies supplied by the framework when constructing and polling a sensor.
 
     ``config`` is this sensor's configuration block only, not the full agent
     configuration. ``state`` is already bound to ``sensor_name``.
     """
 
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     datadir: Path
     sensor_name: str
     config: Mapping[str, Any]
-    state: SensorStateStore
-    logger: logging.Logger
-    now: Callable[[], datetime]
+    state: Annotated[SensorStateStore, SkipValidation()]
+    logger: Annotated[logging.Logger, SkipValidation()]
+    now: Annotated[Callable[[], datetime], SkipValidation()]
 
 
-@dataclass(frozen=True, slots=True)
-class SensorObservation:
+class SensorObservation(BaseModel):
     """A structured fact produced by a sensor poll.
 
     Observation fields are data, never executable instructions. ``dedupe_key``
@@ -114,32 +114,52 @@ class SensorObservation:
     in the agent-facing prompt as an instruction.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     kind: str
     summary: str
     dedupe_key: str
-    payload: Mapping[str, JSONValue] = field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime | None = None
     severity: Severity = "info"
 
-    def __post_init__(self) -> None:
-        _require_single_line(self.kind, field_name="kind", max_chars=KIND_MAX_CHARS)
-        if not isinstance(self.summary, str) or not self.summary.strip():
+    @field_validator("kind")
+    @classmethod
+    def _validate_kind(cls, value: str) -> str:
+        return _require_single_line(value, field_name="kind", max_chars=KIND_MAX_CHARS)
+
+    @field_validator("summary")
+    @classmethod
+    def _validate_summary(cls, value: str) -> str:
+        if not value.strip():
             raise ValueError("summary must be a non-empty string")
-        if len(self.summary) > SUMMARY_MAX_CHARS:
+        if len(value) > SUMMARY_MAX_CHARS:
             raise ValueError(f"summary must be at most {SUMMARY_MAX_CHARS} characters")
-        if not isinstance(self.payload, Mapping):
+        return value
+
+    @field_validator("dedupe_key")
+    @classmethod
+    def _validate_dedupe_key(cls, value: str) -> str:
+        return _require_single_line(
+            value, field_name="dedupe_key", max_chars=DEDUPE_KEY_MAX_CHARS
+        )
+
+    @field_validator("payload")
+    @classmethod
+    def _validate_payload(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
             raise ValueError("payload must be a mapping")
-        canonical_payload = validate_json_value(dict(self.payload), name="payload")
+        canonical_payload = validate_json_value(dict(value), name="payload")
         if not isinstance(canonical_payload, dict):
             raise ValueError("payload must be a JSON object")
-        object.__setattr__(self, "payload", MappingProxyType(canonical_payload))
-        _require_single_line(
-            self.dedupe_key, field_name="dedupe_key", max_chars=DEDUPE_KEY_MAX_CHARS
-        )
-        if self.occurred_at is not None and not isinstance(self.occurred_at, datetime):
-            raise ValueError("occurred_at must be a datetime or None")
-        if self.severity not in SEVERITIES:
+        return canonical_payload
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _validate_severity(cls, value: Any) -> Severity:
+        if value not in SEVERITIES:
             raise ValueError("severity must be one of 'info', 'warning', or 'critical'")
+        return value  # type: ignore[return-value]
 
 
 @runtime_checkable
@@ -157,8 +177,7 @@ class Sensor(Protocol):
 SensorFactory = Callable[[SensorRuntime], Sensor]
 
 
-@dataclass(frozen=True, slots=True)
-class SensorSpec:
+class SensorSpec(BaseModel):
     """Declarative registration data for one sensor plugin.
 
     ``name`` is the YAML configuration key and the state-store namespace.
@@ -166,20 +185,20 @@ class SensorSpec:
     ``interval_seconds`` (default 300).
     """
 
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     name: str
     description: str
-    factory: SensorFactory
-    default_interval_seconds: int = DEFAULT_INTERVAL_SECONDS
+    factory: Annotated[SensorFactory, SkipValidation()]
+    default_interval_seconds: StrictInt = DEFAULT_INTERVAL_SECONDS
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def _validate_spec(self) -> Self:
         validate_sensor_name(self.name)
-        if not isinstance(self.description, str) or not self.description.strip():
+        if not self.description.strip():
             raise ValueError("SensorSpec.description must be a non-empty string")
         if not callable(self.factory):
             raise ValueError("SensorSpec.factory must be callable")
-        if (
-            isinstance(self.default_interval_seconds, bool)
-            or not isinstance(self.default_interval_seconds, int)
-            or self.default_interval_seconds <= 0
-        ):
+        if self.default_interval_seconds <= 0:
             raise ValueError("SensorSpec.default_interval_seconds must be a positive integer")
+        return self

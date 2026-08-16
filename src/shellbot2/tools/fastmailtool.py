@@ -1,20 +1,12 @@
-import requests
-import json
 import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import requests
+
 from shellbot2.tools.tool_spec import ToolSpec
 from shellbot2.tools.util import classproperty
-
-import requests
-import json
-from datetime import datetime, timezone, timedelta
-
-import requests
-import json
-from datetime import datetime, timezone, timedelta
 
 class FastmailClient:
     SESSION_URL = "https://api.fastmail.com/jmap/session"
@@ -53,18 +45,21 @@ class FastmailClient:
         resp.raise_for_status()
         return resp.json()
 
-    def _fetch_details(self, email_ids):
+    def _fetch_details(self, email_ids, *, fetch_body_values=True):
         if not email_ids:
             return []
-            
+
+        properties = ["id", "subject", "from", "receivedAt", "preview"]
+        if fetch_body_values:
+            properties.extend(["textBody", "bodyValues"])
+
         get_call = [
             "Email/get",
             {
                 "accountId": self.account_id,
                 "ids": email_ids,
-                # Added 'preview' to the properties list
-                "properties": ["id", "subject", "from", "receivedAt", "preview", "textBody", "bodyValues"],
-                "fetchTextBodyValues": True 
+                "properties": properties,
+                "fetchTextBodyValues": fetch_body_values,
             },
             "1"
         ]
@@ -81,7 +76,17 @@ class FastmailClient:
                 text_content += values[part['partId']]['value']
         return text_content
 
-    def search_messages(self, keyword=None, subject_keyword=None, sender_keyword=None, since_dt=None, limit=20):
+    def search_messages(
+        self,
+        keyword=None,
+        subject_keyword=None,
+        sender_keyword=None,
+        since_dt=None,
+        limit=20,
+        *,
+        ascending=False,
+        fetch_body_values=True,
+    ):
         filter_condition = {}
         
         if keyword:
@@ -105,7 +110,7 @@ class FastmailClient:
             {
                 "accountId": self.account_id,
                 "filter": filter_condition,
-                "sort": [{"property": "receivedAt", "isAscending": False}],
+                "sort": [{"property": "receivedAt", "isAscending": ascending}],
                 "limit": limit
             },
             "0"
@@ -118,7 +123,7 @@ class FastmailClient:
             raise ValueError(f"Search failed: {response['methodResponses'][0][1]}")
 
         email_ids = response['methodResponses'][0][1]['ids']
-        return self._fetch_details(email_ids)
+        return self._fetch_details(email_ids, fetch_body_values=fetch_body_values)
 
     def get_email_by_id(self, email_id: str):
         """

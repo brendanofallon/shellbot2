@@ -190,7 +190,7 @@ If the `sensors` section is omitted from `agent_conf.yaml` or `enabled` is not `
 Two packages are involved:
 
 - **`shellbot2.sensorframework`** owns discovery, YAML validation, the poll scheduler, namespaced SQLite state, deduplication/cooldowns, and prompt rendering.
-- **`shellbot2.sensors`** holds packaged implementations (currently `disk_usage`). Custom plugins can also live as `*.py` files under `<datadir>/sensors/` (for example `~/.shellbot2/sensors/`).
+- **`shellbot2.sensors`** holds packaged implementations (currently `disk_usage` and `fastmail_email`). Custom plugins can also live as `*.py` files under `<datadir>/sensors/` (for example `~/.shellbot2/sensors/`).
 
 At daemon startup, if sensors are enabled:
 
@@ -306,7 +306,30 @@ sensors:
         min_free_percent: 10
 ```
 
-There are no bundled mail, calendar, traffic, or hardware sensors.
+### Bundled `fastmail_email` sensor
+
+`fastmail_email` polls the Fastmail JMAP API for mail received after its durable
+cursor. Its first poll establishes that cursor at the current time, so existing
+mail is not replayed. Later polls emit the sender, subject, preview snippet,
+and received time for each new message. Set `FASTMAIL_API_TOKEN` in the daemon
+environment; do not put the token in `agent_conf.yaml`.
+
+```yaml
+sensors:
+  enabled: true
+  entries:
+    - name: fastmail_email
+      enabled: true
+      interval_seconds: 300
+      cooldown_seconds: 0
+      config:
+        max_messages: 10           # 1–100 messages per poll
+```
+
+Messages are fetched oldest first, so a busy mailbox is drained in bounded
+batches without skipping older new mail.
+
+There are no bundled calendar, traffic, or hardware sensors.
 
 ## Configuration: agent_conf.yaml
 

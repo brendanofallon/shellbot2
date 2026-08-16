@@ -1,17 +1,17 @@
-<<<<<<< HEAD
+
 from unittest.mock import MagicMock, patch
 
 from shellbot2.agent import ShellBot3
 from shellbot2.tools.discovery import discover_tool_specs
 from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
-=======
-import pytest
+
+
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from shellbot2.agent import ShellBot3, create_azure_provider, _is_azure_foundry_v1_endpoint
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.azure import AzureProvider
->>>>>>> 463889bfa7604b9953f2d58dfc4ca08fedc67e7a
+
 
 
 class EchoTool:
@@ -218,8 +218,7 @@ def test_context_dependent_factories_receive_agent_runtime(tmp_path, monkeypatch
         "subtask_modules_dir": tmp_path / "subtask_modules",
         "zmq_input_address": "tcp://127.0.0.1:9999",
     }
-<<<<<<< HEAD
-=======
+
     
     # Initialize bot
     bot = ShellBot3(datadir=tmp_path)
@@ -257,4 +256,4 @@ def test_create_azure_provider_uses_openai_for_foundry_v1():
 def test_create_azure_provider_uses_azure_for_classic_endpoint():
     provider = create_azure_provider({})
     assert isinstance(provider, AzureProvider)
->>>>>>> 463889bfa7604b9953f2d58dfc4ca08fedc67e7a
+    

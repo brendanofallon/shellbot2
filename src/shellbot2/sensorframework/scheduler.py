@@ -148,7 +148,9 @@ class SensorScheduler:
         try:
             if state.sensor is None:
                 state.sensor = entry.spec.factory(runtime)
+            logger.info("Polling sensor %r", entry.name)
             observations = await state.sensor.poll(runtime)
+            logger.info("Polled sensor %r; got %d observations", entry.name, len(observations))
         except asyncio.CancelledError:
             raise
         except Exception:
