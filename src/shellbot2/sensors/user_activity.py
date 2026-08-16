@@ -24,7 +24,7 @@ from shellbot2.sensorframework.sensor_spec import (
 
 
 DEFAULT_INTERVAL_SECONDS = 1800
-DEFAULT_RECENT_FILE_COUNT = 20
+DEFAULT_RECENT_FILE_COUNT = 40
 MAX_RECENT_FILE_COUNT = 100
 MAX_SOURCE_FILE_BYTES = 25_000_000
 MAX_TEXT_READ_BYTES = 1_000_000
@@ -314,3 +314,37 @@ SENSOR_SPECS = (
         default_interval_seconds=DEFAULT_INTERVAL_SECONDS,
     ),
 )
+
+
+if __name__ == "__main__":
+    import logging
+
+    import dotenv
+
+
+    class EphemeralState:
+        def __init__(self) -> None:
+            self._values: dict[str, Any] = {}
+
+        def get(self, key: str, default: Any = None) -> Any:
+            return self._values.get(key, default)
+
+        def set(self, key: str, value: Any) -> None:
+            self._values[key] = value
+
+        def delete(self, key: str) -> None:
+            self._values.pop(key, None)
+
+    dotenv.load_dotenv()
+    logging.basicConfig(level=logging.INFO)
+    runtime = SensorRuntime(
+        datadir=Path.home() / ".shellbot2",
+        sensor_name="user_activity",
+        config={"recent_file_count": 20},
+        state=EphemeralState(),
+        logger=logging.getLogger("shellbot2.sensors.user_activity.manual"),
+        now=lambda: datetime.now(timezone.utc),
+    )
+    observations = asyncio.run(UserActivitySensor().poll(runtime))
+    for observation in observations:
+        print(observation.model_dump_json(indent=2))
