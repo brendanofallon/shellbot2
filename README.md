@@ -56,6 +56,26 @@ All data (message history, logs, configuration) is stored in `~/.shellbot2` by d
 python -m shellbot2.cli --datadir /path/to/data ask "Your prompt"
 ```
 
+Conversation history and sensor state share one SQLite database at `shellbot2.db` in this directory.
+
+### Database Migration
+
+Existing installations with separate `message_history.db` and `sensor_state.db` files must migrate before starting the updated application. Stop the daemon and every ShellBot client first, then run:
+
+```bash
+uv run python scripts/migrate_conversation_sensor_db.py --datadir ~/.shellbot2
+```
+
+The script creates `shellbot2.db`, verifies SQLite integrity and copied row counts, and leaves the legacy files unchanged for rollback. It refuses to overwrite an existing `shellbot2.db`. If a prior sensor configuration used a custom or absolute state path, pass it explicitly:
+
+```bash
+uv run python scripts/migrate_conversation_sensor_db.py \
+  --datadir ~/.shellbot2 \
+  --sensor-db /path/to/legacy/sensor_state.db
+```
+
+After starting the updated application, verify conversation retrieval and sensor behavior before manually removing the legacy database files.
+
 ### Daemon Mode
 
 Daemon mode runs ShellBot2 as a persistent background service that listens for prompts on a ZeroMQ socket. This is ideal for integrating with other applications or running long-lived agent tasks.
@@ -203,7 +223,7 @@ At daemon startup, if sensors are enabled:
 
 Plugin failures are fail-closed: a broken import, factory, or `poll()` is logged and retried on the next interval. It cannot stop other sensors or terminate the daemon.
 
-State lives in SQLite (`sensor_state.db` under the data directory by default). Each plugin may `get` / `set` / `delete` JSON-safe values in its own namespace. Framework cooldown records use a reserved namespace a plugin cannot overwrite.
+State lives in the shared SQLite database (`shellbot2.db` under the data directory). Each plugin may `get` / `set` / `delete` JSON-safe values in its own namespace. Framework cooldown records use a reserved namespace a plugin cannot overwrite.
 
 ### Writing a sensor
 
@@ -568,7 +588,6 @@ No sensor is loaded unless `sensors.enabled` is `true` and the sensor is listed 
 ```yaml
 sensors:
   enabled: true
-  state_db: sensor_state.db          # relative to datadir unless absolute
   default_interval_seconds: 300
   queue_maxsize: 100
   entries:
@@ -583,7 +602,6 @@ sensors:
 ```
 
 - **`enabled`** (optional, default treated as false): must be `true` to discover and schedule sensors.
-- **`state_db`** (optional, default `sensor_state.db`): SQLite path, relative to the data directory unless absolute.
 - **`default_interval_seconds`** (optional, default `300`): global default used when resolving intervals.
 - **`queue_maxsize`** (optional, default `100`): bound on the daemon's shared user/sensor work queue.
 - **`entries`**: list of mappings. Required per entry: **`name`**. Optional: **`enabled`**, **`interval_seconds`**, **`cooldown_seconds`**, **`thread_id`**, **`config`**.

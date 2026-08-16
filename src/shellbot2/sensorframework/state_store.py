@@ -1,5 +1,6 @@
 """Durable, namespaced sensor state backed by SQLite."""
 
+from datetime import datetime
 from pathlib import Path
 import json
 import logging
@@ -7,7 +8,9 @@ import os
 import sqlite3
 
 from shellbot2.sensorframework.sensor_spec import (
+    KIND_MAX_CHARS,
     JSONValue,
+    SEVERITIES,
     STATE_KEY_MAX_CHARS,
     validate_json_value,
     validate_sensor_name,
@@ -19,6 +22,8 @@ logger = logging.getLogger(__name__)
 PLUGIN_NAMESPACE = "plugin"
 FRAMEWORK_NAMESPACE = "framework"
 DELIVERY_KEY_PREFIX = "delivery:"
+OBSERVATION_SUMMARY_MAX_CHARS = 500
+OBSERVATION_RETENTION_COUNT = 1_000
 
 
 def ensure_parent_dir(path: Path) -> None:
@@ -56,7 +61,8 @@ class SqliteSensorStateStore:
     """SQLite key-value store keyed by ``(sensor_name, namespace, key)``.
 
     Plugin state and framework delivery metadata share a database but not a
-    namespace, so a plugin cannot overwrite cooldown or dedupe records.
+    namespace, so a plugin cannot overwrite cooldown or dedupe records. The
+    database also keeps a bounded, framework-owned history of observations.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -71,6 +77,18 @@ class SqliteSensorStateStore:
                 key TEXT NOT NULL,
                 value TEXT NOT NULL,
                 PRIMARY KEY (sensor_name, namespace, key)
+            )
+            """
+        )
+        self._conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS sensor_observations (
+                id INTEGER PRIMARY KEY,
+                observed_at TEXT NOT NULL,
+                sensor_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+                summary TEXT NOT NULL CHECK (length(summary) <= {OBSERVATION_SUMMARY_MAX_CHARS})
             )
             """
         )
@@ -123,6 +141,57 @@ class SqliteSensorStateStore:
             f"{DELIVERY_KEY_PREFIX}{dedupe_key}",
             record,
         )
+
+    def record_observation(
+        self,
+        *,
+        observed_at: datetime,
+        sensor_name: str,
+        kind: str,
+        severity: str,
+        summary: str,
+    ) -> None:
+        """Persist one observation and prune history to the most recent 1,000."""
+
+        validate_sensor_name(sensor_name, field_name="sensor_name")
+        if not isinstance(observed_at, datetime):
+            raise ValueError("observed_at must be a datetime")
+        if not isinstance(kind, str) or not kind.strip() or len(kind) > KIND_MAX_CHARS:
+            raise ValueError(f"kind must be a non-empty string up to {KIND_MAX_CHARS} characters")
+        if severity not in SEVERITIES:
+            raise ValueError("severity must be one of 'info', 'warning', or 'critical'")
+        if not isinstance(summary, str):
+            raise ValueError("summary must be a string")
+
+        conn = self._require_conn()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO sensor_observations (
+                    observed_at, sensor_name, kind, severity, summary
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    observed_at.isoformat(),
+                    sensor_name,
+                    kind,
+                    severity,
+                    summary[:OBSERVATION_SUMMARY_MAX_CHARS],
+                ),
+            )
+            conn.execute(
+                """
+                DELETE FROM sensor_observations
+                WHERE id NOT IN (
+                    SELECT id
+                    FROM sensor_observations
+                    ORDER BY id DESC
+                    LIMIT ?
+                )
+                """,
+                (OBSERVATION_RETENTION_COUNT,),
+            )
 
     def _validate_key(self, key: str) -> str:
         if not isinstance(key, str) or not key.strip():

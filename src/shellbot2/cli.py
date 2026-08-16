@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from ag_ui.core import BaseEvent
 from shellbot2.agent import ShellBot3, load_conf
+from shellbot2.database import database_path
 from shellbot2.event_dispatcher import create_rich_output_dispatcher, RichOutputHandler
 from shellbot2.memory_extractor import MemoryExtractor
 from shellbot2.message_history import MessageHistory
@@ -71,7 +72,7 @@ def resolve_cli_thread_id(datadir: Path, *, new_thread: bool) -> str:
     source of truth, so background sensor activity cannot change it.
     """
 
-    message_history = MessageHistory(datadir / "message_history.db")
+    message_history = MessageHistory(database_path(datadir))
     if new_thread:
         thread_id = str(uuid.uuid4())
     else:
@@ -376,7 +377,7 @@ async def extract_memories(args: argparse.Namespace) -> None:
     logger = logging.getLogger(__name__)
 
     conf = load_conf(args.datadir)
-    message_history = MessageHistory(args.datadir / "message_history.db")
+    message_history = MessageHistory(database_path(args.datadir))
     memory_tool = MemoryTool()
 
     thread_id = getattr(args, "thread_id", None)

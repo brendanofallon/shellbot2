@@ -112,5 +112,5 @@ TOOL_SPECS = (
 
 
 if __name__ == "__main__":
-    tool = ConversationSearchTool(db_path="sb3datadir/message_history.db")
+    tool = ConversationSearchTool(db_path="sb3datadir/shellbot2.db")
     print(tool(query="git error"))

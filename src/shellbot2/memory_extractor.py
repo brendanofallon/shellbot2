@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from shellbot2.agent import initialize_bedrock_model, load_conf
+from shellbot2.database import database_path
 from shellbot2.message_history import MessageHistory
 from shellbot2.tools.memorytool import MemoryTool
 
@@ -254,7 +255,7 @@ async def run_extraction(datadir: Path, thread_id: Optional[str] = None) -> list
 
     Args:
         datadir: Path to the shellbot data directory containing agent_conf.yaml
-                 and the message_history database.
+            and the shared application database.
         thread_id: Optional thread ID to extract from. If None, uses the most
                    recent thread.
 
@@ -262,7 +263,7 @@ async def run_extraction(datadir: Path, thread_id: Optional[str] = None) -> list
         List of extracted and stored memories.
     """
     conf = load_conf(datadir)
-    message_history = MessageHistory(datadir / "message_history.db")
+    message_history = MessageHistory(database_path(datadir))
     memory_tool = MemoryTool()
 
     if thread_id is None:

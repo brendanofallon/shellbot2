@@ -186,6 +186,13 @@ class SensorScheduler:
                     type(observation).__name__,
                 )
                 continue
+            self._state_store.record_observation(
+                observed_at=observation.occurred_at or now,
+                sensor_name=entry.name,
+                kind=observation.kind,
+                severity=observation.severity,
+                summary=observation.summary,
+            )
             self._handle_observation(state, observation, now)
 
         state.status.last_success_at = now

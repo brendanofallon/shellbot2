@@ -26,6 +26,7 @@ import zmq
 import zmq.asyncio
 
 from shellbot2.agent import ShellBot3, load_conf
+from shellbot2.database import database_path
 from shellbot2.event_dispatcher import create_zeromq_dispatcher
 from shellbot2.input_message import InputMessage
 from shellbot2.sensorframework.config import SensorsConfig, parse_sensors_config, sensors_section_enabled
@@ -114,11 +115,10 @@ class AgentDaemon:
         specs = discover_sensor_specs(self.datadir / "sensors")
         sensors_config = parse_sensors_config(
             conf.get("sensors"),
-            datadir=self.datadir,
             available_specs=specs,
         )
         self.queue_maxsize = sensors_config.queue_maxsize
-        self._state_store = SqliteSensorStateStore(sensors_config.state_db_path)
+        self._state_store = SqliteSensorStateStore(database_path(self.datadir))
         self._scheduler = SensorScheduler(
             sensors_config.entries,
             datadir=self.datadir,
@@ -204,11 +204,11 @@ class AgentDaemon:
         names = [entry.name for entry in self._sensors_config.entries]
         intervals = {entry.name: entry.interval_seconds for entry in self._sensors_config.entries}
         logger.info(
-            "Sensors enabled: count=%s names=%s intervals=%s state_db=%s",
+            "Sensors enabled: count=%s names=%s intervals=%s database=%s",
             len(names),
             names,
             intervals,
-            self._sensors_config.state_db_path,
+            database_path(self.datadir),
         )
 
     async def _receive_loop(self) -> None:

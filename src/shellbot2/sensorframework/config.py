@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 import logging
 
@@ -15,7 +14,6 @@ from shellbot2.sensorframework.sensor_spec import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_DB = "sensor_state.db"
 DEFAULT_QUEUE_MAXSIZE = 100
 DEFAULT_COOLDOWN_SECONDS = 0
 
@@ -40,7 +38,6 @@ class SensorsConfig:
     """
 
     enabled: bool
-    state_db_path: Path
     default_interval_seconds: int
     queue_maxsize: int
     entries: tuple[ResolvedSensorEntry, ...]
@@ -58,7 +55,6 @@ def sensors_section_enabled(conf: Mapping[str, Any] | None) -> bool:
 def parse_sensors_config(
     sensors_section: Any,
     *,
-    datadir: Path,
     available_specs: Mapping[str, SensorSpec],
 ) -> SensorsConfig:
     """Parse and validate a ``sensors`` mapping from ``agent_conf.yaml``.
@@ -69,13 +65,17 @@ def parse_sensors_config(
     """
 
     if sensors_section is None:
-        return _disabled_config(datadir)
+        return _disabled_config()
     if not isinstance(sensors_section, Mapping):
         raise ValueError("sensors configuration must be a mapping")
+    if "state_db" in sensors_section:
+        raise ValueError(
+            "sensors.state_db is no longer supported; sensor data uses the shared application database"
+        )
 
     enabled = sensors_section.get("enabled", False)
     if enabled is not True:
-        return _disabled_config(datadir, raw=sensors_section)
+        return _disabled_config()
 
     default_interval_seconds = _parse_positive_int(
         sensors_section.get("default_interval_seconds", DEFAULT_INTERVAL_SECONDS),
@@ -85,8 +85,6 @@ def parse_sensors_config(
         sensors_section.get("queue_maxsize", DEFAULT_QUEUE_MAXSIZE),
         name="sensors.queue_maxsize",
     )
-    state_db_path = _resolve_state_db(sensors_section.get("state_db", DEFAULT_STATE_DB), datadir)
-
     raw_entries = sensors_section.get("entries", [])
     if raw_entries is None:
         raw_entries = []
@@ -108,33 +106,19 @@ def parse_sensors_config(
 
     return SensorsConfig(
         enabled=True,
-        state_db_path=state_db_path,
         default_interval_seconds=default_interval_seconds,
         queue_maxsize=queue_maxsize,
         entries=tuple(resolved),
     )
 
 
-def _disabled_config(datadir: Path, raw: Mapping[str, Any] | None = None) -> SensorsConfig:
-    state_db = DEFAULT_STATE_DB
-    if raw is not None and isinstance(raw.get("state_db"), str):
-        state_db = raw["state_db"]
+def _disabled_config() -> SensorsConfig:
     return SensorsConfig(
         enabled=False,
-        state_db_path=_resolve_state_db(state_db, datadir),
         default_interval_seconds=DEFAULT_INTERVAL_SECONDS,
         queue_maxsize=DEFAULT_QUEUE_MAXSIZE,
         entries=(),
     )
-
-
-def _resolve_state_db(state_db: Any, datadir: Path) -> Path:
-    if not isinstance(state_db, str) or not state_db.strip():
-        raise ValueError("sensors.state_db must be a non-empty string")
-    path = Path(state_db)
-    if not path.is_absolute():
-        path = Path(datadir) / path
-    return path
 
 
 def _parse_entry(

@@ -61,6 +61,17 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# ShellBot2 durable data
+shellbot2.db
+shellbot2.db-shm
+shellbot2.db-wal
+message_history.db
+message_history.db-shm
+message_history.db-wal
+sensor_state.db
+sensor_state.db-shm
+sensor_state.db-wal
+
 # Flask stuff:
 instance/
 .webassets-cache

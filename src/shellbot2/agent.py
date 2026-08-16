@@ -31,6 +31,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from shellbot2.tools.botfunctions import ShellFunction, ReaderFunction, ClipboardFunction, PythonFunction, TavilySearchFunction
 from shellbot2.context_compaction import ContextCompactionConfig, compact_recent_interactions
+from shellbot2.database import database_path
 from shellbot2.message_history import MessageHistory
 from shellbot2.event_dispatcher import EventDispatcher, create_rich_output_dispatcher
 from shellbot2.tools.discovery import discover_tool_specs
@@ -177,14 +178,14 @@ def initialize_bedrock_model(model: str, region_name: str = 'us-west-2', aws_pro
 
 class ShellBot3:
     def __init__(self, datadir: Path, thread_id: str = None, event_dispatcher: EventDispatcher = None):
-        self.message_history = MessageHistory(datadir / "message_history.db")
+        self.datadir = Path(datadir)
+        self.message_history = MessageHistory(database_path(self.datadir))
         if thread_id is None:
             thread_id = self.message_history.get_most_recent_thread_id()
             if thread_id is None:
                 thread_id = str(uuid.uuid4())
-        self.datadir = datadir
         self.thread_id = thread_id
-        self.conf = load_conf(datadir)
+        self.conf = load_conf(self.datadir)
         logger.info(f"Config: {self.conf}")
         tools = self._create_tools()
         self.agent = self._initialize_agent(self.conf, tools)

@@ -653,5 +653,5 @@ class MessageHistory:
         return "\n\n".join(formatted_results)
 
 if __name__ == "__main__":
-    message_history = MessageHistory(db_path="sb3datadir/message_history.db")
+    message_history = MessageHistory(db_path="sb3datadir/shellbot2.db")
     print(message_history.search("git error"))
