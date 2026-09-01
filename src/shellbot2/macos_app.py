@@ -15,8 +15,23 @@ _TERMINATE_LATER = 2
 CliMain = Callable[..., Awaitable[None]]
 
 
+def _ensure_appkit_loaded() -> None:
+    """Load AppKit before Rubicon looks up Cocoa classes.
+
+    ``rubicon.objc.eventloop`` resolves ``NSEvent`` at import time. That class
+    lives in AppKit, which is not loaded automatically in a frozen app (or a
+    plain Python process that has not imported AppKit yet).
+    """
+
+    from rubicon.objc.runtime import load_library
+
+    load_library("AppKit")
+
+
 def run_daemon_application(cli_main: CliMain) -> None:
     """Run the CLI in an NSApplication lifecycle with graceful quit support."""
+
+    _ensure_appkit_loaded()
 
     from rubicon.objc import NSObject, ObjCClass, objc_method
     from rubicon.objc.eventloop import CocoaLifecycle, RubiconEventLoop

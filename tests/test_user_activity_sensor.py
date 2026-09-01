@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import os
 import zipfile
 
@@ -14,6 +14,7 @@ from shellbot2.sensors.user_activity import (
     ACTIVITY_KIND,
     FileActivityTools,
     UserActivitySensor,
+    _create_activity_agent,
 )
 
 
@@ -204,3 +205,24 @@ def test_packaged_discovery_includes_user_activity():
     specs = discover_sensor_specs()
 
     assert specs["user_activity"].default_interval_seconds == 1800
+
+
+def test_activity_agent_uses_foundry_env_vars_without_azure_openai_key(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    with patch.dict(
+        os.environ,
+        {
+            "AZURE_FOUNDRY_ENDPOINT": (
+                "https://resource-openai-sandbox-eastus2.services.ai.azure.com/openai/v1/"
+            ),
+            "AZURE_FOUNDRY_API_KEY": "foundry-key",
+            "AZURE_OPENAI_API_KEY": "",
+            "AZURE_OPENAI_ENDPOINT": "",
+        },
+        clear=False,
+    ):
+        agent = _create_activity_agent(FileActivityTools(home))
+
+    assert agent.model.model_name == "gpt-5.6-luna"
+    assert agent.model.system == "openai"

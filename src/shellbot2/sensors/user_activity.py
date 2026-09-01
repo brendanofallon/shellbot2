@@ -15,6 +15,7 @@ import zipfile
 import pymupdf4llm
 from pydantic_ai import Agent
 
+from shellbot2.azure_provider import create_azure_chat_model
 from shellbot2.sensorframework.sensor_spec import (
     DEDUPE_KEY_MAX_CHARS,
     SensorObservation,
@@ -209,7 +210,7 @@ class FileActivityTools:
 
 def _create_activity_agent(tools: FileActivityTools) -> Agent:
     return Agent(
-        model="openrouter:openai/gpt-5.6-luna",
+        model=create_azure_chat_model("gpt-5.6-luna"),
         instructions=(
             "You are a private, read-only observer that infers a rough summary of "
             "what the user has recently been working on. You have only two "

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from shellbot2.agent import initialize_bedrock_model, load_conf
+from shellbot2.azure_provider import create_azure_chat_model
 from shellbot2.database import database_path
 from shellbot2.message_history import MessageHistory
 from shellbot2.tools.memorytool import MemoryTool
@@ -123,17 +124,23 @@ class MemoryExtractor:
         Initialize the pydantic-ai extraction agent.
 
         Follows the same model initialization pattern as agent.py: if conf specifies
-        provider='bedrock', a BedrockConverseModel is created; otherwise the model
-        string is passed directly.
+        provider='bedrock', a BedrockConverseModel is created; provider='azure' or
+        an azure: model string uses the Foundry-aware Azure provider; otherwise the
+        model string is passed directly.
         """
+        resolved_name = self.conf.get("model", model_name)
         if self.conf.get("provider") == "bedrock":
             bedrock_conf = self.conf.get("bedrock", {})
             model = initialize_bedrock_model(
-                self.conf.get("model", model_name),
+                resolved_name,
                 bedrock_conf.get("region_name", "us-west-2"),
             )
+        elif self.conf.get("provider") == "azure" or (
+            isinstance(resolved_name, str) and resolved_name.startswith("azure:")
+        ):
+            model = create_azure_chat_model(resolved_name, self.conf)
         else:
-            model = self.conf.get("model", model_name)
+            model = resolved_name
 
         return Agent(
             model,

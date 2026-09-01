@@ -8,7 +8,13 @@ from shellbot2.tools.tool_spec import ToolRuntime, ToolSpec
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from shellbot2.agent import ShellBot3, create_azure_provider, _is_azure_foundry_v1_endpoint
+from shellbot2.agent import ShellBot3
+from shellbot2.azure_provider import (
+    _is_azure_foundry_v1_endpoint,
+    create_azure_chat_model,
+    create_azure_provider,
+)
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.azure import AzureProvider
 
@@ -237,21 +243,51 @@ def test_context_dependent_factories_receive_agent_runtime(tmp_path, monkeypatch
 def test_azure_foundry_v1_endpoint_detection():
     assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1/")
     assert _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/openai/v1")
+    assert _is_azure_foundry_v1_endpoint(
+        "https://resource-openai-sandbox-eastus2.services.ai.azure.com/openai/v1/"
+    )
     assert not _is_azure_foundry_v1_endpoint("https://example.openai.azure.com/")
 
-@patch.dict('os.environ', {
-    'AZURE_FOUNDRY_ENDPOINT': 'https://example.openai.azure.com/openai/v1/',
-    'AZURE_FOUNDRY_API_KEY': 'test-key',
-}, clear=False)
-def test_create_azure_provider_uses_openai_for_foundry_v1():
-    provider = create_azure_provider({})
+
+def _foundry_only_env():
+    return patch.dict(
+        'os.environ',
+        {
+            'AZURE_FOUNDRY_ENDPOINT': (
+                'https://resource-openai-sandbox-eastus2.services.ai.azure.com/openai/v1/ '
+            ),
+            'AZURE_FOUNDRY_API_KEY': 'foundry-key',
+            'AZURE_OPENAI_API_KEY': '',
+            'AZURE_OPENAI_ENDPOINT': '',
+        },
+        clear=False,
+    )
+
+
+def test_create_azure_provider_uses_foundry_env_vars_without_azure_openai_key():
+    with _foundry_only_env():
+        provider = create_azure_provider({})
     assert isinstance(provider, OpenAIProvider)
-    assert provider.base_url.rstrip('/') == 'https://example.openai.azure.com/openai/v1'
+    assert provider.base_url.rstrip('/') == (
+        'https://resource-openai-sandbox-eastus2.services.ai.azure.com/openai/v1'
+    )
+    assert provider.client.api_key == 'foundry-key'
+
+
+def test_create_azure_chat_model_strips_azure_prefix():
+    with _foundry_only_env():
+        model = create_azure_chat_model('azure:gpt-5.6-luna')
+    assert isinstance(model, OpenAIChatModel)
+    assert model.model_name == 'gpt-5.6-luna'
+    assert isinstance(model._provider, OpenAIProvider)
+
 
 @patch.dict('os.environ', {
     'AZURE_OPENAI_ENDPOINT': 'https://example.openai.azure.com/',
     'AZURE_OPENAI_API_KEY': 'test-key',
     'OPENAI_API_VERSION': '2025-01-01-preview',
+    'AZURE_FOUNDRY_ENDPOINT': '',
+    'AZURE_FOUNDRY_API_KEY': '',
 }, clear=False)
 def test_create_azure_provider_uses_azure_for_classic_endpoint():
     provider = create_azure_provider({})
